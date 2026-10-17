@@ -5,7 +5,7 @@ your budget. Everything stays on the phone: no account, no bank linking, and no 
 permission.
 
 **Download:** the latest build is the `Selavu.apk` in the
-[`selavu-latest` release](https://github.com/Akrishna87/Akrishna87/releases/tag/selavu-latest), or from the
+[`selavu-latest` release](https://github.com/Akrishna87/selavu/releases/tag/selavu-latest), or from the
 [download page](https://akrishna87.github.io/Akrishna87/apps/).
 
 ## What it does
@@ -52,7 +52,7 @@ by unit tests (`app/src/test`).
 ./gradlew testReleaseUnitTest assembleRelease
 ```
 
-The [workflow](../.github/workflows/selavu-apk.yml) runs the unit tests, builds the APK, installs it on
+The [workflow](.github/workflows/apk.yml) runs the unit tests, builds the APK, installs it on
 an Android 14 emulator and runs [`ci/smoke-test.sh`](ci/smoke-test.sh) (add an expense and an income,
 a repeating entry, a budget, the reports, delete, restart, the shortcut), then publishes the APK with
 the test's screenshots as the `selavu-latest` release.
