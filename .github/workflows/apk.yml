@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# Builds made while the app lived in Akrishna87/Akrishna87 went up to 3; starting this repo's
+# numbers at 101 keeps each new build installable as an update over those.
+env:
+  BUILD_OFFSET: 100
+
 concurrency:
   group: selavu-apk-${{ github.ref }}
   cancel-in-progress: true
@@ -23,8 +28,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests and the APK
         env:
-          VERSION_CODE: ${{ github.run_number }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
+          export VERSION_CODE=$((BUILD_OFFSET + RUN_NUMBER))
           set +e
           ./gradlew --no-daemon testReleaseUnitTest assembleRelease 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
@@ -109,10 +115,11 @@ jobs:
           mkdir -p out/screens
           cp smoke/*.png out/screens/ 2>/dev/null || true
           apk=out/Selavu.apk
+          build=$((BUILD_OFFSET + ${{ github.run_number }}))
           cat > out/version.json <<JSON
           {
-            "versionCode": ${{ github.run_number }},
-            "versionName": "1.0.${{ github.run_number }}",
+            "versionCode": $build,
+            "versionName": "1.0.$build",
             "apk": "Selavu.apk",
             "sha256": "$(sha256sum "$apk" | cut -d' ' -f1)",
             "size": $(stat -c %s "$apk")
@@ -122,5 +129,5 @@ jobs:
           gh release create selavu-latest "$apk" out/version.json out/screens/*.png \
             --target "$GITHUB_SHA" \
             --prerelease \
-            --title "Selavu for Android (build ${{ github.run_number }})" \
+            --title "Selavu for Android (build $build)" \
             --notes "Download **Selavu.apk** on your Android phone, open it, and allow installing from your browser when asked. Each new build installs as an update over the last one. The PNG files are screenshots from the automatic emulator test of this build."
