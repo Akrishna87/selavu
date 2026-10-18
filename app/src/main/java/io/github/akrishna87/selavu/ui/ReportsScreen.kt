@@ -138,6 +138,7 @@ fun ReportsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
 @Composable
 private fun Donut(shares: List<CategoryShare>, modifier: Modifier) {
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    val colors = shares.map { categoryColor(it.category.color) }
     Canvas(modifier.semantics { contentDescription = "Chart by category" }) {
         val stroke = size.minDimension * 0.16f
         val d = size.minDimension - stroke
@@ -146,9 +147,9 @@ private fun Donut(shares: List<CategoryShare>, modifier: Modifier) {
         // A small gap between slices, unless one category is everything.
         val gap = if (shares.size > 1) 1.5f else 0f
         var start = -90f
-        shares.forEach { s ->
+        shares.forEachIndexed { i, s ->
             val sweep = s.share * 360f
-            if (sweep > gap) drawArc(Color(s.category.color), start + gap / 2, sweep - gap, false, topLeft, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Butt))
+            if (sweep > gap) drawArc(colors[i], start + gap / 2, sweep - gap, false, topLeft, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Butt))
             start += sweep
         }
     }
@@ -172,7 +173,7 @@ private fun ShareRow(s: CategoryShare, currency: String, onClick: () -> Unit) {
                 LinearProgressIndicator(
                     progress = { s.share },
                     modifier = Modifier.weight(1f).height(6.dp),
-                    color = Color(s.category.color),
+                    color = categoryColor(s.category.color),
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     strokeCap = StrokeCap.Round,
                     drawStopIndicator = {},

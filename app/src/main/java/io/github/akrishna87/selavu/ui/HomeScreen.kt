@@ -96,7 +96,7 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
             Button(
                 onClick = { vm.open(Screen.Edit(TxType.EXPENSE)) },
                 modifier = Modifier.weight(1f).height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = money.expense, contentColor = MaterialTheme.colorScheme.surface),
+                colors = ButtonDefaults.buttonColors(containerColor = money.expenseContainer, contentColor = money.onExpenseContainer),
             ) {
                 Icon(Icons.Default.Remove, contentDescription = null)
                 Spacer(Modifier.size(6.dp))
@@ -105,7 +105,7 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
             Button(
                 onClick = { vm.open(Screen.Edit(TxType.INCOME)) },
                 modifier = Modifier.weight(1f).height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = money.income, contentColor = MaterialTheme.colorScheme.surface),
+                colors = ButtonDefaults.buttonColors(containerColor = money.incomeContainer, contentColor = money.onIncomeContainer),
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.size(6.dp))

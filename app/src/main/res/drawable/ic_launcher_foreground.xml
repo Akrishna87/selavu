@@ -12,7 +12,7 @@
         android:scaleY="0.6">
         <!-- Bank note -->
         <path
-            android:fillColor="#CDEBC4"
+            android:fillColor="#D6E6D2"
             android:pathData="M112,70 L400,40 Q420,38 422,58 L432,150 L120,150 Z" />
         <!-- Wallet body -->
         <path
@@ -24,7 +24,7 @@
             android:pathData="M300,236 L464,236 L464,348 L300,348 Q276,348 276,324 L276,260 Q276,236 300,236 Z" />
         <!-- Clasp -->
         <path
-            android:fillColor="#7A2E0B"
+            android:fillColor="#6E3A26"
             android:pathData="M340,292 m-24,0 a24,24 0,1 1,48 0 a24,24 0,1 1,-48 0" />
     </group>
 </vector>

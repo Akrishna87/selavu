@@ -88,7 +88,7 @@ fun PeriodPicker(
 
 @Composable
 fun CategoryIcon(category: Category?, size: Dp = 40.dp) {
-    val color = Color(category?.color ?: 0xFF768390)
+    val color = categoryColor(category?.color ?: 0xFF768390)
     Box(
         Modifier.size(size).clip(CircleShape).background(color.copy(alpha = 0.22f)),
         contentAlignment = Alignment.Center,

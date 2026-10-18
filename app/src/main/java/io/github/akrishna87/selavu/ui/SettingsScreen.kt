@@ -336,7 +336,7 @@ fun CategoryDialog(existing: Category?, type: TxType, onDismiss: () -> Unit, onS
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CategoryColors.all.forEach { c ->
                         Box(
-                            Modifier.size(32.dp).background(Color(c), CircleShape)
+                            Modifier.size(32.dp).background(categoryColor(c), CircleShape)
                                 .then(if (c == color) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
                                 .clickable { color = c },
                         )
