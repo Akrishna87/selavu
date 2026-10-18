@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,32 +14,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,13 +38,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.akrishna87.selavu.AppViewModel
@@ -91,6 +82,7 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
     val recurring = existing?.recurringId?.let { id -> ledger.recurring.firstOrNull { it.id == id } }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (existing == null) runCatching { focus.requestFocus() } }
+    val noun = if (type == TxType.EXPENSE) "expense" else "income"
 
     fun save() {
         triedSave = true
@@ -103,148 +95,134 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
     }
 
     Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-        TopAppBar(
-            windowInsets = WindowInsets(0),
-            title = {
-                Text(
-                    (if (existing == null) "New " else "Edit ") + if (type == TxType.EXPENSE) "expense" else "income",
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
-            actions = {
-                if (existing != null) {
-                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
-                }
-            },
+        NavBar(
+            title = (if (existing == null) "New " else "Edit ") + noun,
+            leading = { TextAction("Cancel") { vm.back() } },
+            trailing = { TextAction("Save", bold = true) { save() } },
         )
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                listOf(TxType.EXPENSE to "Expense", TxType.INCOME to "Income").forEachIndexed { i, (t, label) ->
-                    SegmentedButton(
-                        selected = type == t,
-                        onClick = {
-                            if (type != t) {
-                                type = t
-                                categoryId = ledger.lastCategory(t)
-                            }
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(i, 2),
-                    ) { Text(label) }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Segmented(
+                listOf("Expense", "Income"), if (type == TxType.EXPENSE) 0 else 1,
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            ) { i ->
+                val t = if (i == 0) TxType.EXPENSE else TxType.INCOME
+                if (type != t) {
+                    type = t
+                    categoryId = ledger.lastCategory(t)
                 }
             }
 
-            OutlinedTextField(
-                value = amountText,
-                onValueChange = { v -> amountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
-                modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                label = { Text("Amount") },
-                prefix = { Text(ledger.settings.currency, style = MaterialTheme.typography.headlineMedium) },
-                textStyle = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, color = amountColor(type)),
-                singleLine = true,
-                isError = triedSave && amount == null,
-                supportingText = { if (triedSave && amount == null) Text("Enter an amount") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { save() }),
-            )
-
-            Column {
-                Text("Category", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ledger.categories(type).forEach { c ->
-                        FilterChip(
-                            selected = c.id == categoryId,
-                            onClick = { categoryId = c.id },
-                            label = { Text("${c.emoji}  ${c.name}") },
-                        )
-                    }
-                    AssistChip(onClick = { newCategory = true }, label = { Text("＋ New") })
-                }
-            }
-
-            Column {
-                Text("Date", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = date == today, onClick = { dateEpoch = today.toEpochDay() }, label = { Text("Today") })
-                    FilterChip(
-                        selected = date == today.minusDays(1),
-                        onClick = { dateEpoch = today.minusDays(1).toEpochDay() },
-                        label = { Text("Yesterday") },
-                    )
-                    val other = date != today && date != today.minusDays(1)
-                    FilterChip(
-                        selected = other,
-                        onClick = { showDate = true },
-                        label = { Text(if (other) shortDate(date, today) else "Pick a date") },
-                        leadingIcon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
-                    )
-                }
-            }
-
-            OutlinedTextField(
-                value = note,
-                onValueChange = { note = it.take(200) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Note (optional)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { save() }),
-            )
-
-            Column {
-                Text("Repeat", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                if (existing == null) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Repeat.entries.forEach { r ->
-                            FilterChip(selected = repeat == r, onClick = { repeat = r }, label = { Text(r.label) })
-                        }
-                    }
-                    if (repeat != Repeat.NONE) {
-                        Text(
-                            "It will be logged ${repeat.label.lowercase()} on its own, starting " + when (date) {
-                                today -> "today."
-                                today.minusDays(1) -> "yesterday."
-                                else -> "on ${shortDate(date, today)}."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else if (recurring != null) {
-                    Row {
-                        Icon(Icons.Default.Repeat, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.padding(4.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("${recurring.repeat.label}, next on ${shortDate(recurring.nextDate, today)}")
-                            Text(
-                                "Changes here apply to this entry only.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    TextButton(onClick = { vm.stopRecurring(recurring.id) }) { Text("Stop repeating") }
-                } else {
-                    Text(
-                        if (existing.recurringId != null) "Logged by a repeat that has been stopped." else "Doesn't repeat.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             Spacer(Modifier.height(8.dp))
+            GroupCard {
+                Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Amount", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+                    PlainField(
+                        value = amountText,
+                        onValueChange = { v -> amountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
+                        placeholder = "0",
+                        modifier = Modifier.focusRequester(focus).padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.displayMedium.copy(textAlign = TextAlign.Center),
+                        prefix = ledger.settings.currency,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { save() }),
+                    )
+                }
+            }
+            if (triedSave && amount == null) SectionFooter("Enter an amount.")
+
+            SectionHeader("Category")
+            GroupCard {
+                FlowRow(
+                    Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ledger.categories(type).forEach { c ->
+                        Pill("${c.emoji}  ${c.name}", c.id == categoryId) { categoryId = c.id }
+                    }
+                    Pill("＋ New", false) { newCategory = true }
+                }
+            }
+
+            SectionHeader("Date")
+            GroupCard {
+                Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("Today", date == today) { dateEpoch = today.toEpochDay() }
+                    Pill("Yesterday", date == today.minusDays(1)) { dateEpoch = today.minusDays(1).toEpochDay() }
+                    val other = date != today && date != today.minusDays(1)
+                    Pill(
+                        if (other) shortDate(date, today) else "Pick a date", other,
+                        leading = {
+                            Icon(
+                                Icons.Rounded.CalendarMonth, contentDescription = null,
+                                tint = if (other) Color.White else palette.tint, modifier = Modifier.size(18.dp).padding(end = 4.dp),
+                            )
+                        },
+                    ) { showDate = true }
+                }
+            }
+
+            SectionHeader("Note")
+            GroupCard {
+                PlainField(
+                    value = note,
+                    onValueChange = { note = it.take(200) },
+                    placeholder = "Note (optional)",
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { save() }),
+                )
+            }
+
+            SectionHeader("Repeat")
+            if (existing == null) {
+                GroupCard {
+                    FlowRow(
+                        Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Repeat.entries.forEach { r -> Pill(r.label, repeat == r) { repeat = r } }
+                    }
+                }
+                if (repeat != Repeat.NONE) {
+                    SectionFooter(
+                        "It will be logged ${repeat.label.lowercase()} on its own, starting " + when (date) {
+                            today -> "today."
+                            today.minusDays(1) -> "yesterday."
+                            else -> "on ${shortDate(date, today)}."
+                        },
+                    )
+                }
+            } else if (recurring != null) {
+                GroupCard {
+                    ListRow(
+                        "${recurring.repeat.label}, next on ${shortDate(recurring.nextDate, today)}",
+                        icon = { Icon(Icons.Rounded.Repeat, contentDescription = null, tint = palette.tint) },
+                    )
+                    RowDivider()
+                    ListRow("Stop repeating", titleColor = palette.red, chevron = false) { vm.stopRecurring(recurring.id) }
+                }
+                SectionFooter("Changes here apply to this entry only.")
+            } else {
+                GroupCard {
+                    ListRow(if (existing.recurringId != null) "Logged by a repeat that has been stopped" else "Doesn't repeat", titleColor = palette.secondaryLabel)
+                }
+            }
+
+            if (existing != null) {
+                Spacer(Modifier.height(32.dp))
+                GroupCard {
+                    Text(
+                        "Delete $noun",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = palette.red,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().tap { confirmDelete = true }.padding(vertical = 13.dp),
+                    )
+                }
+            }
         }
-        Button(
-            onClick = { save() },
-            modifier = Modifier.fillMaxWidth().padding(16.dp).height(52.dp),
-        ) { Text("Save", style = MaterialTheme.typography.titleMedium) }
     }
 
     if (showDate) {
@@ -254,35 +232,37 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
         DatePickerDialog(
             onDismissRequest = { showDate = false },
             confirmButton = {
-                TextButton(onClick = {
+                TextAction("Done", bold = true) {
                     state.selectedDateMillis?.let {
                         dateEpoch = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().toEpochDay()
                     }
                     showDate = false
-                }) { Text("OK") }
+                }
             },
-            dismissButton = { TextButton(onClick = { showDate = false }) { Text("Cancel") } },
+            dismissButton = { TextAction("Cancel") { showDate = false } },
         ) { DatePicker(state) }
     }
 
     if (confirmDelete && existing != null) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete this entry?") },
+            containerColor = palette.card,
+            title = { Text("Delete this entry?", style = MaterialTheme.typography.titleMedium) },
             text = {
                 Text(
                     if (recurring != null) "Only this entry is deleted. It will keep repeating; use Stop repeating for that."
                     else "This can't be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextAction("Delete", bold = true, color = palette.red) {
                     vm.deleteTransaction(existing.id)
                     confirmDelete = false
                     vm.back()
-                }) { Text("Delete") }
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+            dismissButton = { TextAction("Cancel") { confirmDelete = false } },
         )
     }
 

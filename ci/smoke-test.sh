@@ -158,14 +158,14 @@ tap home "Reports"
 sleep 2
 dump reports
 shot 5-reports
-expect reports 'text="By category"' "Reports didn't open"
+expect reports 'text="BY CATEGORY"' "Reports didn't open"
 expect reports 'text="₹1,249"' "Reports doesn't total the spending"
 expect reports 'text="Entertainment"' "Reports doesn't list the categories"
 expect reports 'text="80%"' "Reports doesn't show each category's share"
 tap reports "Entertainment"
 sleep 2
 dump detail
-expect detail 'text="1 entry"' "a category's page doesn't list its entries"
+expect detail 'text="1 ENTRY"' "a category's page doesn't list its entries"
 adb shell input keyevent KEYCODE_BACK
 sleep 1
 for p in Week Year Day; do

@@ -1,14 +1,10 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package io.github.akrishna87.selavu.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,21 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -48,7 +33,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.akrishna87.selavu.AppViewModel
@@ -79,17 +63,13 @@ fun ReportsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     val buckets = trend(period, inPeriod, type)
 
     Column(Modifier.fillMaxSize().padding(padding)) {
-        PeriodPicker(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+        PeriodHeader(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    listOf(TxType.EXPENSE to "Spending", TxType.INCOME to "Income").forEachIndexed { i, (t, label) ->
-                        SegmentedButton(
-                            selected = type == t, onClick = { type = t },
-                            shape = SegmentedButtonDefaults.itemShape(i, 2),
-                        ) { Text(label) }
-                    }
-                }
+                Segmented(
+                    listOf("Spending", "Income"), if (type == TxType.EXPENSE) 0 else 1,
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { type = if (it == 0) TxType.EXPENSE else TxType.INCOME }
             }
             if (shares.isEmpty()) {
                 item {
@@ -101,33 +81,42 @@ fun ReportsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                 return@LazyColumn
             }
             item {
-                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    Donut(shares, Modifier.size(200.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (type == TxType.EXPENSE) "Spent" else "Earned", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(Money.format(total, currency), style = MaterialTheme.typography.headlineSmall)
-                        if (period.type != PeriodType.DAY) {
+                Spacer(Modifier.height(8.dp))
+            }
+            item {
+                GroupCard {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 20.dp), contentAlignment = Alignment.Center) {
+                        Donut(shares, Modifier.size(190.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "${Money.format(averagePerDay(period, total, today), currency)} a day",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                if (type == TxType.EXPENSE) "Spent" else "Earned",
+                                style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
                             )
+                            Text(Money.format(total, currency), style = MaterialTheme.typography.titleLarge, color = palette.label)
+                            if (period.type != PeriodType.DAY) {
+                                Text(
+                                    "${Money.format(averagePerDay(period, total, today), currency)} a day",
+                                    style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
+                                )
+                            }
                         }
                     }
                 }
             }
             item { SectionHeader("By category") }
-            items(shares, key = { it.category.id }) { s ->
-                ShareRow(s, currency) { vm.open(Screen.CategoryDetail(s.category.id)) }
+            item {
+                GroupCard {
+                    shares.forEachIndexed { i, s ->
+                        if (i > 0) RowDivider(inset = 62.dp)
+                        ShareRow(s, currency) { vm.open(Screen.CategoryDetail(s.category.id)) }
+                    }
+                }
             }
             if (buckets.isNotEmpty()) {
                 item { SectionHeader(if (period.type == PeriodType.YEAR) "By month" else "By day") }
                 item {
-                    Card(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    ) {
-                        Bars(buckets, currency, amountColor(type), Modifier.padding(12.dp))
+                    GroupCard {
+                        Bars(buckets, currency, if (type == TxType.EXPENSE) palette.tint else palette.green, Modifier.padding(16.dp))
                     }
                 }
             }
@@ -137,51 +126,54 @@ fun ReportsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
 
 @Composable
 private fun Donut(shares: List<CategoryShare>, modifier: Modifier) {
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    val track = palette.fill
+    val gapColor = palette.card
     val colors = shares.map { categoryColor(it.category.color) }
     Canvas(modifier.semantics { contentDescription = "Chart by category" }) {
-        val stroke = size.minDimension * 0.16f
+        val stroke = size.minDimension * 0.13f
         val d = size.minDimension - stroke
         val topLeft = Offset((size.width - d) / 2, (size.height - d) / 2)
         drawArc(track, 0f, 360f, false, topLeft, Size(d, d), style = Stroke(stroke))
-        // A small gap between slices, unless one category is everything.
-        val gap = if (shares.size > 1) 1.5f else 0f
         var start = -90f
         shares.forEachIndexed { i, s ->
             val sweep = s.share * 360f
-            if (sweep > gap) drawArc(colors[i], start + gap / 2, sweep - gap, false, topLeft, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Butt))
+            drawArc(colors[i], start, sweep, false, topLeft, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Butt))
             start += sweep
+        }
+        // Thin gaps between slices in the card's colour, unless one category is everything.
+        if (shares.size > 1) {
+            start = -90f
+            shares.forEach { s ->
+                drawArc(gapColor, start - 0.8f, 1.6f, false, topLeft, Size(d, d), style = Stroke(stroke + 2f))
+                start += s.share * 360f
+            }
         }
     }
 }
 
 @Composable
 private fun ShareRow(s: CategoryShare, currency: String, onClick: () -> Unit) {
+    val color = categoryColor(s.category.color)
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().tap(onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryIcon(s.category, 36.dp)
+        CategoryIcon(s.category)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(s.category.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                Text(Money.format(s.total, currency), fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(s.category.name, style = MaterialTheme.typography.bodyLarge, color = palette.label, modifier = Modifier.weight(1f))
+                Text(Money.format(s.total, currency), style = MaterialTheme.typography.bodyLarge, color = palette.label)
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LinearProgressIndicator(
-                    progress = { s.share },
-                    modifier = Modifier.weight(1f).height(6.dp),
-                    color = categoryColor(s.category.color),
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    strokeCap = StrokeCap.Round,
-                    drawStopIndicator = {},
-                )
+                Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(palette.fill)) {
+                    Box(Modifier.fillMaxWidth(s.share.coerceIn(0f, 1f)).height(4.dp).clip(RoundedCornerShape(2.dp)).background(color))
+                }
                 Text(
                     "${(s.share * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.secondaryLabel,
                     textAlign = TextAlign.End,
                     modifier = Modifier.width(44.dp),
                 )
@@ -193,40 +185,35 @@ private fun ShareRow(s: CategoryShare, currency: String, onClick: () -> Unit) {
 @Composable
 private fun Bars(buckets: List<Bucket>, currency: String, color: Color, modifier: Modifier) {
     val max = buckets.maxOf { it.total }.coerceAtLeast(1)
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    val track = palette.fill
     val today = LocalDate.now()
     Column(modifier) {
-        Text(
-            "Highest: ${Money.format(max, currency)}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+        Text("Highest", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+        Text(Money.format(max, currency), style = MaterialTheme.typography.titleMedium, color = palette.label)
+        Spacer(Modifier.height(12.dp))
+        Canvas(Modifier.fillMaxWidth().height(130.dp)) {
             val slot = size.width / buckets.size
-            val bar = (slot * 0.62f).coerceAtLeast(2f)
+            val bar = (slot * 0.56f).coerceAtLeast(2f)
+            val r = CornerRadius(minOf(bar / 2, 4.dp.toPx()))
             buckets.forEachIndexed { i, b ->
                 val h = size.height * b.total / max
                 val x = i * slot + (slot - bar) / 2
                 val isNow = !today.isBefore(b.start) && !today.isAfter(b.end)
-                drawRoundRect(track, Offset(x, 0f), Size(bar, size.height), CornerRadius(bar / 2))
+                drawRoundRect(track, Offset(x, 0f), Size(bar, size.height), r)
                 if (b.total > 0) {
-                    drawRoundRect(
-                        if (isNow) color else color.copy(alpha = 0.75f),
-                        Offset(x, size.height - h), Size(bar, h), CornerRadius(bar / 2),
-                    )
+                    drawRoundRect(if (isNow) color else color.copy(alpha = 0.55f), Offset(x, size.height - h), Size(bar, h), r)
                 }
             }
         }
         // Labels: every bar for a week or year, about every fifth day for a month.
         val step = if (buckets.size > 12) 5 else 1
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             buckets.forEachIndexed { i, b ->
                 Text(
                     if (i % step == 0) b.label else "",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.secondaryLabel,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     softWrap = false,
@@ -244,25 +231,30 @@ fun CategoryDetailScreen(vm: AppViewModel, ledger: Ledger, categoryId: String, p
     val today = LocalDate.now()
     val entries = ledger.transactions.inPeriod(period).filter { it.categoryId == categoryId }.sortedByDescending { it.date }
     Column(Modifier.fillMaxSize().padding(padding)) {
-        TopAppBar(
-            windowInsets = WindowInsets(0),
-            title = { Text("${category?.emoji ?: ""} ${category?.name ?: "Category"}".trim()) },
-            navigationIcon = {
-                IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            },
+        NavBar(
+            title = "${category?.emoji ?: ""} ${category?.name ?: "Category"}".trim(),
+            leading = { BackAction("Reports") { vm.back() } },
         )
-        PeriodPicker(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
-        LazyColumn(Modifier.weight(1f)) {
+        PeriodHeader(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 SectionHeader(
                     "${entries.size} ${if (entries.size == 1) "entry" else "entries"}",
                     Money.format(entries.sumOf { it.amount }, ledger.settings.currency),
                 )
             }
-            if (entries.isEmpty()) item { EmptyState("🗂️", "Nothing in this period", "Try another period with the arrows above.") }
-            items(entries, key = { it.id }) { t ->
-                TransactionRow(t, category, ledger.settings.currency, subtitle = dayHeading(t.date, today)) {
-                    vm.open(Screen.Edit(t.type, t.id))
+            if (entries.isEmpty()) {
+                item { EmptyState("🗂️", "Nothing in this period", "Try another period with the arrows above.") }
+            } else {
+                item {
+                    GroupCard {
+                        entries.forEachIndexed { i, t ->
+                            if (i > 0) RowDivider(inset = 62.dp)
+                            TransactionRow(t, category, ledger.settings.currency, subtitle = dayHeading(t.date, today)) {
+                                vm.open(Screen.Edit(t.type, t.id))
+                            }
+                        }
+                    }
                 }
             }
         }
