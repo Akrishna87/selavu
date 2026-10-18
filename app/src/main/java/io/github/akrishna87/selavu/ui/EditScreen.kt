@@ -3,6 +3,11 @@
 package io.github.akrishna87.selavu.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -62,6 +67,38 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
+/**
+ * The amount, large and centred with the currency symbol right before it. The field is sized to
+ * what's typed, so the symbol and the digits stay together as the number grows.
+ */
+@Composable
+private fun AmountField(value: String, onChange: (String) -> Unit, currency: String, modifier: Modifier, onDone: () -> Unit) {
+    val style = MaterialTheme.typography.displayMedium
+    val measurer = rememberTextMeasurer()
+    val width = with(LocalDensity.current) {
+        measurer.measure(value.ifEmpty { "0" }, style).size.width.toDp() + 4.dp
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(currency, style = style, color = if (value.isEmpty()) palette.tertiaryLabel else palette.label)
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = modifier.width(width),
+            textStyle = style.copy(color = palette.label),
+            singleLine = true,
+            cursorBrush = SolidColor(palette.tint),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) Text("0", style = style, color = palette.tertiaryLabel)
+                    inner()
+                }
+            },
+        )
+    }
+}
+
 /** Adding a new expense or income, or changing one ([txId] set). */
 @Composable
 fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String?, padding: PaddingValues) {
@@ -116,16 +153,10 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
             GroupCard {
                 Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Amount", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
-                    PlainField(
-                        value = amountText,
-                        onValueChange = { v -> amountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
-                        placeholder = "0",
-                        modifier = Modifier.focusRequester(focus).padding(horizontal = 16.dp),
-                        style = MaterialTheme.typography.displayMedium.copy(textAlign = TextAlign.Center),
-                        prefix = ledger.settings.currency,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { save() }),
-                    )
+                    AmountField(
+                        amountText, { v -> amountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
+                        ledger.settings.currency, Modifier.focusRequester(focus),
+                    ) { save() }
                 }
             }
             if (triedSave && amount == null) SectionFooter("Enter an amount.")
