@@ -39,7 +39,9 @@ import io.github.akrishna87.selavu.core.Money
 import io.github.akrishna87.selavu.core.PeriodType
 import io.github.akrishna87.selavu.core.Totals
 import io.github.akrishna87.selavu.core.TxType
+import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.budgetFor
+import io.github.akrishna87.selavu.core.inCurrency
 import io.github.akrishna87.selavu.core.byDay
 import io.github.akrishna87.selavu.core.dayHeading
 import io.github.akrishna87.selavu.core.inPeriod
@@ -50,25 +52,47 @@ import java.time.LocalDate
 fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     val period = vm.period()
     val today = LocalDate.now()
-    val currency = ledger.settings.currency
-    val inPeriod = ledger.transactions.inPeriod(period)
+    val currency = vm.currency(ledger)
+    val inPeriod = ledger.inCurrency(currency).inPeriod(period)
     val totals = inPeriod.totals()
     val days = inPeriod.byDay()
     // The budget card shows when looking at the same kind of period the budget is set for,
     // and on a single day, where it says how much is left for that day.
-    val budgetType = if (ledger.settings.budgetPeriod == BudgetPeriod.WEEKLY) PeriodType.WEEK else PeriodType.MONTH
+    val budgetType = if (ledger.settings.budgets[currency]?.period == BudgetPeriod.WEEKLY) PeriodType.WEEK else PeriodType.MONTH
     val budget = when (vm.periodType) {
-        budgetType, PeriodType.DAY -> ledger.budgetFor(period.start, today)
+        budgetType, PeriodType.DAY -> ledger.budgetFor(period.start, today, currency)
         else -> null
     }
+    val accounts = ledger.accounts(currency)
 
     Column(Modifier.fillMaxSize().padding(padding)) {
+        CurrencySwitcher(ledger.currencies(), currency, vm::chooseCurrency)
         PeriodHeader(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)) {
             item { SummaryCard(totals, currency) }
             if (budget != null) {
                 item { Spacer(Modifier.height(12.dp)) }
                 item { BudgetCard(budget, currency, perDayOnly = vm.periodType == PeriodType.DAY) }
+            }
+            if (accounts.isNotEmpty()) {
+                item {
+                    SectionHeader(
+                        if (accounts.size == 1) "Account" else "Accounts",
+                        if (accounts.size > 1) "Total ${Money.format(accounts.sumOf { ledger.balance(it.id) }, currency)}" else null,
+                    )
+                }
+                item {
+                    GroupCard {
+                        accounts.forEachIndexed { i, a ->
+                            if (i > 0) RowDivider(inset = 62.dp)
+                            ListRow(
+                                a.name,
+                                value = balanceText(a, ledger.balance(a.id)),
+                                icon = { AccountIcon(a) },
+                            ) { vm.open(Screen.AccountDetail(a.id)) }
+                        }
+                    }
+                }
             }
             if (days.isEmpty()) {
                 item {
@@ -86,7 +110,7 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                     GroupCard {
                         day.transactions.forEachIndexed { i, t ->
                             if (i > 0) RowDivider(inset = 62.dp)
-                            TransactionRow(t, ledger.category(t.categoryId), currency) {
+                            TransactionRow(t, ledger, currency) {
                                 vm.open(Screen.Edit(t.type, t.id))
                             }
                         }

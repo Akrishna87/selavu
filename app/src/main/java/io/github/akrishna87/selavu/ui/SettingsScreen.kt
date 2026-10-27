@@ -20,9 +20,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Category
@@ -52,7 +56,13 @@ import androidx.compose.ui.unit.dp
 import io.github.akrishna87.selavu.AppViewModel
 import io.github.akrishna87.selavu.BuildConfig
 import io.github.akrishna87.selavu.Screen
+import io.github.akrishna87.selavu.core.Account
+import io.github.akrishna87.selavu.core.AccountType
+import io.github.akrishna87.selavu.core.Budget
 import io.github.akrishna87.selavu.core.BudgetPeriod
+import io.github.akrishna87.selavu.core.Currencies
+import io.github.akrishna87.selavu.core.accountUsage
+import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.Category
 import io.github.akrishna87.selavu.core.CategoryColors
 import io.github.akrishna87.selavu.core.Ledger
@@ -75,8 +85,9 @@ private val Indigo = Color(0xFF5856D6)
 @Composable
 fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     val s = ledger.settings
-    var editBudget by remember { mutableStateOf(false) }
+    var editBudget by remember { mutableStateOf<String?>(null) }
     var editCurrency by remember { mutableStateOf(false) }
+    val currencies = ledger.currencies()
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         uri?.let(vm::exportCsv)
     }
@@ -89,18 +100,28 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         item { SectionHeader("Budget") }
         item {
             GroupCard {
-                ListRow(
-                    "Spending budget",
-                    value = if (s.budget <= 0) "Off"
-                    else "${Money.format(s.budget, s.currency)} ${if (s.budgetPeriod == BudgetPeriod.WEEKLY) "a week" else "a month"}",
-                    icon = { SettingsIcon(Icons.Rounded.Savings, Green) },
-                ) { editBudget = true }
+                // One budget per currency; spending in one never counts against another.
+                currencies.forEachIndexed { i, c ->
+                    if (i > 0) RowDivider(inset = 59.dp)
+                    val b = s.budgets[c]
+                    ListRow(
+                        if (currencies.size == 1) "Spending budget" else "Spending budget (${c.trim()})",
+                        value = if (b == null) "Off"
+                        else "${Money.format(b.amount, c)} ${if (b.period == BudgetPeriod.WEEKLY) "a week" else "a month"}",
+                        icon = { SettingsIcon(Icons.Rounded.Savings, Green) },
+                    ) { editBudget = c }
+                }
             }
         }
         item { SectionFooter("Home shows how much is left and what you can spend a day.") }
         item { SectionHeader("Your money") }
         item {
             GroupCard {
+                ListRow(
+                    "Accounts", value = "${ledger.accounts.size}",
+                    icon = { SettingsIcon(Icons.Rounded.AccountBalance, Teal) },
+                ) { vm.open(Screen.Accounts) }
+                RowDivider(inset = 59.dp)
                 ListRow(
                     "Categories", value = "${ledger.categories.size}",
                     icon = { SettingsIcon(Icons.Rounded.Category, Orange) },
@@ -112,7 +133,7 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                 ) { vm.open(Screen.Repeating) }
                 RowDivider(inset = 59.dp)
                 ListRow(
-                    "Currency", value = s.currency.trim(),
+                    "Main currency", value = s.currency.trim(),
                     icon = { SettingsIcon(Icons.Rounded.CurrencyRupee, Blue) },
                 ) { editCurrency = true }
                 RowDivider(inset = 59.dp)
@@ -166,12 +187,14 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         }
     }
 
-    if (editBudget) BudgetDialog(ledger, onDismiss = { editBudget = false }) { amount, period ->
-        vm.updateSettings { it.copy(budget = amount, budgetPeriod = period) }
-        editBudget = false
+    editBudget?.let { c ->
+        BudgetDialog(ledger, c, onDismiss = { editBudget = null }) { amount, period ->
+            vm.setBudget(c, Budget(amount, period))
+            editBudget = null
+        }
     }
-    if (editCurrency) CurrencyDialog(s.currency, onDismiss = { editCurrency = false }) { c ->
-        vm.updateSettings { it.copy(currency = c) }
+    if (editCurrency) CurrencyDialog(s.currency, currencies.takeIf { it.size > 1 }, onDismiss = { editCurrency = false }) { c ->
+        vm.setMainCurrency(c)
         editCurrency = false
     }
 }
@@ -197,36 +220,189 @@ private fun Alert(
 }
 
 @Composable
-private fun BudgetDialog(ledger: Ledger, onDismiss: () -> Unit, onSave: (Long, BudgetPeriod) -> Unit) {
-    val s = ledger.settings
-    var text by rememberSaveable { mutableStateOf(if (s.budget > 0) Money.plain(s.budget) else "") }
-    var period by rememberSaveable { mutableStateOf(s.budgetPeriod) }
-    Alert("Spending budget", "Save", onConfirm = { onSave(Money.parse(text) ?: 0, period) }, onDismiss = onDismiss) {
+private fun BudgetDialog(ledger: Ledger, currency: String, onDismiss: () -> Unit, onSave: (Long, BudgetPeriod) -> Unit) {
+    val b = ledger.settings.budgets[currency]
+    var text by rememberSaveable { mutableStateOf(b?.let { Money.plain(it.amount) } ?: "") }
+    var period by rememberSaveable { mutableStateOf(b?.period ?: BudgetPeriod.MONTHLY) }
+    Alert(if (ledger.currencies().size == 1) "Spending budget" else "Budget in ${currency.trim()}", "Save", onConfirm = { onSave(Money.parse(text) ?: 0, period) }, onDismiss = onDismiss) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Segmented(listOf("Weekly", "Monthly"), if (period == BudgetPeriod.WEEKLY) 0 else 1) {
                 period = if (it == 0) BudgetPeriod.WEEKLY else BudgetPeriod.MONTHLY
             }
             WellField(
                 text, { v -> text = v.filter { it.isDigit() || it == '.' }.take(14) }, "Budget amount",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = s.currency,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
             )
             Text("Leave it empty to turn the budget off.", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
         }
     }
 }
 
+/**
+ * Choosing the main currency. With several in use, it's one of them (the group Home opens on);
+ * with one, any symbol, which relabels everything.
+ */
 @Composable
-private fun CurrencyDialog(current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun CurrencyDialog(current: String, inUse: List<String>?, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf(current) }
-    Alert("Currency", "Save", onConfirm = { onSave(text.ifBlank { "₹" }) }, onDismiss = onDismiss) {
+    Alert("Main currency", "Save", onConfirm = { onSave(text.ifBlank { current }) }, onDismiss = onDismiss) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("₹", "$", "€", "£", "¥", "AED ", "SGD ", "RM ").forEach { c ->
-                    Pill(c.trim(), text == c) { text = c }
+            if (inUse != null) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    inUse.forEach { c -> Pill(c.trim(), text == c) { text = c } }
+                }
+                Text(
+                    "Home and Reports open on this currency. Each account keeps its own.",
+                    style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
+                )
+            } else {
+                CurrencyPicker(text) { text = it }
+                Text("Only the symbol changes; amounts aren't converted.", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+            }
+        }
+    }
+}
+
+/** Common currency symbols as pills, plus a field for any other. */
+@Composable
+private fun CurrencyPicker(value: String, onChange: (String) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Currencies.common.forEach { c -> Pill(c.trim(), value == c) { onChange(c) } }
+    }
+    WellField(value, { onChange(it.take(5)) }, "Other symbol")
+}
+
+@Composable
+fun AccountsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
+    var editing by remember { mutableStateOf<Account?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<Account?>(null) }
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        NavBar(
+            title = "Accounts",
+            leading = { BackAction("Settings") { vm.back() } },
+            trailing = {
+                Box(Modifier.size(44.dp).clip(CircleShape).tap { adding = true }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Add, contentDescription = "New account", tint = palette.tint, modifier = Modifier.size(28.dp))
+                }
+            },
+        )
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
+            ledger.currencies().forEach { c ->
+                val list = ledger.accounts(c)
+                item(key = "h$c") {
+                    SectionHeader(c.trim(), "Total ${Money.format(list.sumOf { ledger.balance(it.id) }, c)}")
+                }
+                item(key = "c$c") {
+                    GroupCard {
+                        list.forEachIndexed { i, a ->
+                            if (i > 0) RowDivider(inset = 64.dp)
+                            ListRow(a.name, value = balanceText(a, ledger.balance(a.id)), icon = { AccountIcon(a) }) { editing = a }
+                        }
+                    }
                 }
             }
-            WellField(text, { text = it.take(5) }, "Symbol shown before amounts")
-            Text("Only the symbol changes; amounts aren't converted.", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+            item {
+                SectionFooter(
+                    "Each account keeps its own currency, and totals are only added up within a currency. " +
+                        "Use Transfer to move money between accounts, including from one currency to another.",
+                )
+            }
+        }
+    }
+
+    if (adding || editing != null) {
+        AccountDialog(
+            existing = editing,
+            defaultCurrency = ledger.settings.currency,
+            canRemove = editing != null && ledger.accounts.size > 1,
+            onRemove = { deleting = editing; editing = null },
+            onDismiss = { adding = false; editing = null },
+        ) { a ->
+            vm.saveAccount(a)
+            adding = false
+            editing = null
+        }
+    }
+    deleting?.let { a ->
+        val used = ledger.accountUsage(a.id)
+        val others = ledger.accounts(a.currency).filter { it.id != a.id }
+        var moveTo by remember(a.id) { mutableStateOf(others.firstOrNull()?.id) }
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = palette.card,
+            title = { Text("Remove ${a.name}?", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                when {
+                    used == 0 -> Text("It isn't used by any entry.", style = MaterialTheme.typography.bodyMedium)
+                    others.isEmpty() -> Text(
+                        "Its $used ${if (used == 1) "entry needs" else "entries need"} another ${a.currency.trim()} account to move to. Add one first, or delete the entries.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Its $used ${if (used == 1) "entry moves" else "entries move"} to:", style = MaterialTheme.typography.bodyMedium)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            others.forEach { o -> Pill("${o.type.emoji} ${o.name}", moveTo == o.id) { moveTo = o.id } }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextAction("Remove", bold = true, color = palette.red, enabled = used == 0 || others.isNotEmpty()) {
+                    vm.deleteAccount(a.id, moveTo)
+                    deleting = null
+                }
+            },
+            dismissButton = { TextAction("Cancel") { deleting = null } },
+        )
+    }
+}
+
+/** Adding ([existing] null) or changing an account: name, kind, currency and opening balance. */
+@Composable
+private fun AccountDialog(
+    existing: Account?,
+    defaultCurrency: String,
+    canRemove: Boolean,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (Account) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf(existing?.name ?: "") }
+    var type by rememberSaveable { mutableStateOf(existing?.type ?: AccountType.BANK) }
+    var currency by rememberSaveable { mutableStateOf(existing?.currency ?: defaultCurrency) }
+    // A card's opening balance is entered as what's owed, and kept as minus that.
+    var openingText by rememberSaveable {
+        mutableStateOf(existing?.opening?.takeIf { it != 0L }?.let { Money.plain(kotlin.math.abs(it)) } ?: "")
+    }
+    Alert(
+        if (existing == null) "New account" else "Edit account", "Save",
+        confirmEnabled = name.isNotBlank() && currency.isNotBlank(),
+        onConfirm = {
+            val v = Money.parse(openingText) ?: 0
+            val opening = if (type == AccountType.CARD) -v else v
+            onSave((existing ?: Account(newId(), "", type, currency)).copy(name = name.trim(), type = type, currency = currency, opening = opening))
+        },
+        onDismiss = onDismiss,
+    ) {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            WellField(name, { name = it.take(30) }, "Name")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountType.entries.forEach { t -> Pill("${t.emoji} ${t.label}", type == t) { type = t } }
+            }
+            Text("Currency", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+            CurrencyPicker(currency) { currency = it }
+            WellField(
+                openingText, { v -> openingText = v.filter { it.isDigit() || it == '.' }.take(14) },
+                if (type == AccountType.CARD) "Amount owed now" else "Balance now",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
+            )
+            if (canRemove) {
+                Text(
+                    "Remove account", style = MaterialTheme.typography.bodyLarge, color = palette.red,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).tap(onRemove).padding(vertical = 6.dp),
+                )
+            }
         }
     }
 }

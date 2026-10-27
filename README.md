@@ -22,8 +22,17 @@ permission.
   their own when they come due. A monthly entry on the 31st lands on the last day of shorter months.
 - Long-press the app icon for **Add expense** and **Add income** shortcuts
 
+**Accounts and currencies**
+- Bank accounts, credit cards, cash and wallets, each with its own currency and opening balance
+  (a card's is what's owed). Home lists them with their balances; tap one for its history
+- **Currency groups**: when accounts are in more than one currency, a switcher (₹ · $ · …) shows one
+  group at a time. Totals, budgets and reports are per currency and never converted or mixed
+- **Transfers** between your own accounts aren't spending or income. Between currencies you enter
+  both sides, what was sent and what arrived
+- The main currency is the group Home and Reports open on
+
 **Budget**
-- One spending budget, weekly or monthly
+- A spending budget per currency, weekly or monthly
 - Home shows how much is left, a bar that turns amber then red, and how much you can spend a day for
   the rest of the period
 
@@ -35,8 +44,8 @@ permission.
 **Settings**
 - Categories: add, rename, change the emoji and colour, or remove one (its entries move to another)
 - Repeating entries: see what's coming next, and stop any of them
-- Currency symbol (₹ by default, with Indian digit grouping: ₹1,25,000), and whether weeks start on Monday or Sunday
-- **Export to CSV** (Date, Type, Category, Amount, Note) for Excel, Google Sheets or a backup, and
+- Main currency (₹ by default, with Indian digit grouping: ₹1,25,000), and whether weeks start on Monday or Sunday
+- **Export to CSV** (Date, Type, Category, Amount, Currency, Account, To account, To currency, To amount, Note) for Excel, Google Sheets or a backup, and
   **Import from CSV**, which skips entries already there
 
 ## How it's built

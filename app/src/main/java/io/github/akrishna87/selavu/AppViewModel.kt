@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.akrishna87.selavu.core.Account
+import io.github.akrishna87.selavu.core.Budget
 import io.github.akrishna87.selavu.core.Category
 import io.github.akrishna87.selavu.core.Csv
 import io.github.akrishna87.selavu.core.Ledger
@@ -17,6 +19,9 @@ import io.github.akrishna87.selavu.core.Settings
 import io.github.akrishna87.selavu.core.Transaction
 import io.github.akrishna87.selavu.core.TxType
 import io.github.akrishna87.selavu.core.delete
+import io.github.akrishna87.selavu.core.deleteAccount
+import io.github.akrishna87.selavu.core.saveAccount
+import io.github.akrishna87.selavu.core.setMainCurrency
 import io.github.akrishna87.selavu.core.deleteCategory
 import io.github.akrishna87.selavu.core.logDueRecurring
 import io.github.akrishna87.selavu.core.save
@@ -42,6 +47,8 @@ sealed interface Screen {
     data class CategoryDetail(val categoryId: String) : Screen
     data object Categories : Screen
     data object Repeating : Screen
+    data object Accounts : Screen
+    data class AccountDetail(val accountId: String) : Screen
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -62,6 +69,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     var message by mutableStateOf<String?>(null)
+
+    /** The currency group being looked at; null means the main currency. */
+    private var chosenCurrency by mutableStateOf<String?>(null)
+
+    /** The currency group Home and Reports show: the one chosen, if it still has accounts, else the main one. */
+    fun currency(l: Ledger): String = chosenCurrency?.takeIf { it in l.currencies() } ?: l.settings.currency
+
+    fun chooseCurrency(c: String) { chosenCurrency = c }
 
     init {
         viewModelScope.launch {
@@ -116,6 +131,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCategory(c: Category) = update { it.saveCategory(c) }
     fun deleteCategory(id: String, moveTo: String) = update { it.deleteCategory(id, moveTo) }
     fun updateSettings(change: (Settings) -> Settings) = update { it.copy(settings = change(it.settings)) }
+    fun saveAccount(a: Account) = update { it.saveAccount(a) }
+    fun setMainCurrency(c: String) = update { it.setMainCurrency(c) }
+    fun deleteAccount(id: String, moveTo: String?) = update { it.deleteAccount(id, moveTo) }
+
+    /** Sets (or, with an amount of 0, removes) a currency's budget. */
+    fun setBudget(currency: String, budget: Budget) = updateSettings { s ->
+        s.copy(budgets = if (budget.amount > 0) s.budgets + (currency to budget) else s.budgets - currency)
+    }
 
     fun exportCsv(uri: Uri) {
         val l = _ledger.value ?: return

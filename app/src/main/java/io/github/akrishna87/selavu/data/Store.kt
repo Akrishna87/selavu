@@ -2,7 +2,11 @@ package io.github.akrishna87.selavu.data
 
 import android.content.Context
 import android.util.Log
+import io.github.akrishna87.selavu.core.Account
+import io.github.akrishna87.selavu.core.AccountType
+import io.github.akrishna87.selavu.core.Budget
 import io.github.akrishna87.selavu.core.BudgetPeriod
+import io.github.akrishna87.selavu.core.DEFAULT_ACCOUNT
 import io.github.akrishna87.selavu.core.Category
 import io.github.akrishna87.selavu.core.Ledger
 import io.github.akrishna87.selavu.core.Recurring
@@ -48,15 +52,26 @@ class Store(context: Context) {
     }
 
     companion object {
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         fun encode(l: Ledger): JSONObject = JSONObject().apply {
             put("version", VERSION)
             put("settings", JSONObject().apply {
                 put("currency", l.settings.currency)
-                put("budget", l.settings.budget)
-                put("budgetPeriod", l.settings.budgetPeriod.name)
+                put("budgets", JSONObject().apply {
+                    l.settings.budgets.forEach { (currency, b) ->
+                        put(currency, JSONObject().apply { put("amount", b.amount); put("period", b.period.name) })
+                    }
+                })
                 put("weekStartsMonday", l.settings.weekStartsMonday)
+            })
+            put("accounts", JSONArray().apply {
+                l.accounts.forEach { a ->
+                    put(JSONObject().apply {
+                        put("id", a.id); put("name", a.name); put("type", a.type.name)
+                        put("currency", a.currency); put("opening", a.opening)
+                    })
+                }
             })
             put("categories", JSONArray().apply {
                 l.categories.forEach { c ->
@@ -73,6 +88,8 @@ class Store(context: Context) {
                         put("category", t.categoryId); put("date", t.date.toString())
                         if (t.note.isNotEmpty()) put("note", t.note)
                         t.recurringId?.let { put("recurring", it) }
+                        put("account", t.accountId)
+                        t.toAccountId?.let { put("toAccount", it); put("toAmount", t.toAmount) }
                     })
                 }
             })
@@ -82,6 +99,7 @@ class Store(context: Context) {
                         put("id", r.id); put("type", r.type.name); put("amount", r.amount)
                         put("category", r.categoryId); put("note", r.note); put("repeat", r.repeat.name)
                         put("start", r.start.toString()); put("logged", r.logged)
+                        put("account", r.accountId)
                     })
                 }
             })
@@ -89,12 +107,26 @@ class Store(context: Context) {
 
         fun decode(o: JSONObject): Ledger {
             val s = o.optJSONObject("settings")
-            val settings = if (s == null) Settings() else Settings(
-                currency = s.optString("currency", "₹"),
-                budget = s.optLong("budget", 0),
-                budgetPeriod = enumOr(s.optString("budgetPeriod"), BudgetPeriod.MONTHLY),
-                weekStartsMonday = s.optBoolean("weekStartsMonday", true),
-            )
+            val currency = s?.optString("currency", "₹") ?: "₹"
+            val budgets = mutableMapOf<String, Budget>()
+            s?.optJSONObject("budgets")?.let { b ->
+                b.keys().forEach { c ->
+                    val o = b.getJSONObject(c)
+                    budgets[c] = Budget(o.getLong("amount"), enumOr(o.optString("period"), BudgetPeriod.MONTHLY))
+                }
+            }
+            // Version 1 had a single budget, in the one currency there was.
+            if (s != null && !s.has("budgets") && s.optLong("budget", 0) > 0) {
+                budgets[currency] = Budget(s.getLong("budget"), enumOr(s.optString("budgetPeriod"), BudgetPeriod.MONTHLY))
+            }
+            val settings = Settings(currency, budgets, s?.optBoolean("weekStartsMonday", true) ?: true)
+            // Version 1 had no accounts: everything goes into one Cash account in its currency.
+            val accounts = o.optJSONArray("accounts").objects().map { a ->
+                Account(
+                    a.getString("id"), a.getString("name"), enumOr(a.optString("type"), AccountType.OTHER),
+                    a.optString("currency", currency), a.optLong("opening", 0),
+                )
+            }.ifEmpty { listOf(Account(DEFAULT_ACCOUNT, "Cash", AccountType.CASH, currency)) }
             val categories = o.optJSONArray("categories").objects().map { c ->
                 Category(
                     c.getString("id"), c.getString("name"), c.optString("emoji", "🏷️"),
@@ -106,6 +138,9 @@ class Store(context: Context) {
                     t.getString("id"), enumOr(t.optString("type"), TxType.EXPENSE), t.getLong("amount"),
                     t.getString("category"), LocalDate.parse(t.getString("date")), t.optString("note", ""),
                     if (t.has("recurring")) t.getString("recurring") else null,
+                    t.optString("account", DEFAULT_ACCOUNT),
+                    if (t.has("toAccount")) t.getString("toAccount") else null,
+                    t.optLong("toAmount", 0),
                 )
             }
             val recurring = o.optJSONArray("recurring").objects().map { r ->
@@ -113,9 +148,10 @@ class Store(context: Context) {
                     r.getString("id"), enumOr(r.optString("type"), TxType.EXPENSE), r.getLong("amount"),
                     r.getString("category"), r.optString("note", ""), enumOr(r.optString("repeat"), Repeat.MONTHLY),
                     LocalDate.parse(r.getString("start")), r.optInt("logged", 0),
+                    r.optString("account", DEFAULT_ACCOUNT),
                 )
             }
-            return Ledger(categories.ifEmpty { Ledger().categories }, transactions, recurring, settings)
+            return Ledger(categories.ifEmpty { Ledger().categories }, transactions, recurring, settings, accounts)
         }
 
         private fun JSONArray?.objects(): List<JSONObject> =

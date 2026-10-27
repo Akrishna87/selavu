@@ -39,13 +39,17 @@ import io.github.akrishna87.selavu.AppViewModel
 import io.github.akrishna87.selavu.Screen
 import io.github.akrishna87.selavu.core.Bucket
 import io.github.akrishna87.selavu.core.CategoryShare
+import io.github.akrishna87.selavu.core.AccountType
 import io.github.akrishna87.selavu.core.Ledger
+import io.github.akrishna87.selavu.core.Transaction
 import io.github.akrishna87.selavu.core.Money
 import io.github.akrishna87.selavu.core.PeriodType
 import io.github.akrishna87.selavu.core.TxType
 import io.github.akrishna87.selavu.core.averagePerDay
+import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.byCategory
 import io.github.akrishna87.selavu.core.dayHeading
+import io.github.akrishna87.selavu.core.inCurrency
 import io.github.akrishna87.selavu.core.inPeriod
 import io.github.akrishna87.selavu.core.trend
 import java.time.LocalDate
@@ -56,13 +60,14 @@ fun ReportsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     var type by rememberSaveable { mutableStateOf(TxType.EXPENSE) }
     val period = vm.period()
     val today = LocalDate.now()
-    val currency = ledger.settings.currency
-    val inPeriod = ledger.transactions.inPeriod(period)
+    val currency = vm.currency(ledger)
+    val inPeriod = ledger.inCurrency(currency).inPeriod(period)
     val shares = ledger.byCategory(inPeriod, type)
     val total = shares.sumOf { it.total }
     val buckets = trend(period, inPeriod, type)
 
     Column(Modifier.fillMaxSize().padding(padding)) {
+        CurrencySwitcher(ledger.currencies(), currency, vm::chooseCurrency)
         PeriodHeader(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
@@ -229,7 +234,8 @@ fun CategoryDetailScreen(vm: AppViewModel, ledger: Ledger, categoryId: String, p
     val category = ledger.category(categoryId)
     val period = vm.period()
     val today = LocalDate.now()
-    val entries = ledger.transactions.inPeriod(period).filter { it.categoryId == categoryId }.sortedByDescending { it.date }
+    val currency = vm.currency(ledger)
+    val entries = ledger.inCurrency(currency).inPeriod(period).filter { it.categoryId == categoryId }.sortedByDescending { it.date }
     Column(Modifier.fillMaxSize().padding(padding)) {
         NavBar(
             title = "${category?.emoji ?: ""} ${category?.name ?: "Category"}".trim(),
@@ -240,7 +246,7 @@ fun CategoryDetailScreen(vm: AppViewModel, ledger: Ledger, categoryId: String, p
             item {
                 SectionHeader(
                     "${entries.size} ${if (entries.size == 1) "entry" else "entries"}",
-                    Money.format(entries.sumOf { it.amount }, ledger.settings.currency),
+                    Money.format(entries.sumOf { it.amount }, currency),
                 )
             }
             if (entries.isEmpty()) {
@@ -250,7 +256,62 @@ fun CategoryDetailScreen(vm: AppViewModel, ledger: Ledger, categoryId: String, p
                     GroupCard {
                         entries.forEachIndexed { i, t ->
                             if (i > 0) RowDivider(inset = 62.dp)
-                            TransactionRow(t, category, ledger.settings.currency, subtitle = dayHeading(t.date, today)) {
+                            TransactionRow(t, ledger, currency, subtitle = dayHeading(t.date, today)) {
+                                vm.open(Screen.Edit(t.type, t.id))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Everything in and out of one account, newest first, under its balance. */
+@Composable
+fun AccountDetailScreen(vm: AppViewModel, ledger: Ledger, accountId: String, padding: PaddingValues) {
+    val account = ledger.account(accountId) ?: return
+    val today = LocalDate.now()
+    val entries = ledger.transactions.filter { it.accountId == accountId || it.toAccountId == accountId }
+        .withIndex().sortedWith(compareByDescending<IndexedValue<Transaction>> { it.value.date }.thenByDescending { it.index })
+        .map { it.value }
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        NavBar(title = account.name, leading = { BackAction("Back") { vm.back() } })
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
+            item {
+                GroupCard {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "${account.type.label} · ${account.currency.trim()}",
+                            style = MaterialTheme.typography.bodyMedium, color = palette.secondaryLabel,
+                        )
+                        Text(balanceText(account, ledger.balance(accountId)), style = MaterialTheme.typography.displaySmall, color = palette.label)
+                        if (account.opening != 0L) {
+                            Text(
+                                (if (account.type == AccountType.CARD && account.opening < 0) "Owed at the start: " + Money.format(-account.opening, account.currency)
+                                else "Opening balance: " + Money.format(account.opening, account.currency)),
+                                style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
+                            )
+                        }
+                    }
+                }
+            }
+            item { SectionHeader("${entries.size} ${if (entries.size == 1) "entry" else "entries"}") }
+            if (entries.isEmpty()) {
+                item { EmptyState(account.type.emoji, "Nothing in this account yet", "Pick it when adding an expense, income or transfer.") }
+            } else {
+                item {
+                    GroupCard {
+                        entries.forEachIndexed { i, t ->
+                            if (i > 0) RowDivider(inset = 62.dp)
+                            // Amounts are shown as they changed this account's balance, in its currency.
+                            val change = when {
+                                t.type == TxType.TRANSFER && t.accountId == accountId -> -t.amount
+                                t.type == TxType.TRANSFER -> t.toAmount
+                                t.type == TxType.INCOME -> t.amount
+                                else -> -t.amount
+                            }
+                            TransactionRow(t, ledger, account.currency, subtitle = dayHeading(t.date, today), change = change) {
                                 vm.open(Screen.Edit(t.type, t.id))
                             }
                         }

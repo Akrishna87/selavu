@@ -60,6 +60,7 @@ import io.github.akrishna87.selavu.core.Money
 import io.github.akrishna87.selavu.core.Repeat
 import io.github.akrishna87.selavu.core.Transaction
 import io.github.akrishna87.selavu.core.TxType
+import io.github.akrishna87.selavu.core.lastAccount
 import io.github.akrishna87.selavu.core.lastCategory
 import io.github.akrishna87.selavu.core.newId
 import io.github.akrishna87.selavu.core.shortDate
@@ -99,7 +100,7 @@ private fun AmountField(value: String, onChange: (String) -> Unit, currency: Str
     }
 }
 
-/** Adding a new expense or income, or changing one ([txId] set). */
+/** Adding a new expense, income or transfer, or changing one ([txId] set). */
 @Composable
 fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String?, padding: PaddingValues) {
     val existing = remember(txId) { txId?.let { id -> ledger.transactions.firstOrNull { it.id == id } } }
@@ -110,6 +111,17 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
     var dateEpoch by rememberSaveable { mutableStateOf((existing?.date ?: vm.defaultDate()).toEpochDay()) }
     var note by rememberSaveable { mutableStateOf(existing?.note ?: "") }
     var repeat by rememberSaveable { mutableStateOf(Repeat.NONE) }
+    // New entries start in the currency group being looked at.
+    val group = vm.currency(ledger)
+    fun startAccount(t: TxType): String {
+        val last = ledger.lastAccount(t)
+        return if (ledger.account(last)?.currency == group) last else ledger.accounts(group).firstOrNull()?.id ?: last
+    }
+    var accountId by rememberSaveable { mutableStateOf(existing?.accountId ?: startAccount(startType)) }
+    var toAccountId by rememberSaveable {
+        mutableStateOf(existing?.toAccountId ?: ledger.accounts.firstOrNull { it.id != accountId }?.id)
+    }
+    var toAmountText by rememberSaveable { mutableStateOf(existing?.takeIf { it.type == TxType.TRANSFER }?.let { Money.plain(it.toAmount) } ?: "") }
     var showDate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var newCategory by remember { mutableStateOf(false) }
@@ -119,15 +131,36 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
     val recurring = existing?.recurringId?.let { id -> ledger.recurring.firstOrNull { it.id == id } }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (existing == null) runCatching { focus.requestFocus() } }
-    val noun = if (type == TxType.EXPENSE) "expense" else "income"
+    val noun = when (type) {
+        TxType.EXPENSE -> "expense"
+        TxType.INCOME -> "income"
+        TxType.TRANSFER -> "transfer"
+    }
+    val account = ledger.account(accountId) ?: ledger.accounts.first()
+    val toAccount = ledger.account(toAccountId)?.takeIf { it.id != account.id }
+    // Between currencies, what arrived is typed separately; within one currency it's the same amount.
+    val crossCurrency = toAccount != null && toAccount.currency != account.currency
+    val toAmount = if (crossCurrency) Money.parse(toAmountText) else amount
+    val toFocus = remember { FocusRequester() }
 
     fun save() {
         triedSave = true
-        val cat = categoryId?.takeIf { id -> ledger.category(id)?.type == type } ?: return
         if (amount == null) return
-        val tx = existing?.copy(type = type, amount = amount, categoryId = cat, date = date, note = note.trim())
-            ?: Transaction(newId(), type, amount, cat, date, note.trim())
-        vm.saveTransaction(tx, repeat)
+        val tx = if (type == TxType.TRANSFER) {
+            val to = toAccount ?: return
+            val received = toAmount ?: return
+            existing?.copy(
+                type = type, amount = amount, categoryId = "", date = date, note = note.trim(),
+                accountId = account.id, toAccountId = to.id, toAmount = received, recurringId = null,
+            ) ?: Transaction(newId(), type, amount, "", date, note.trim(), accountId = account.id, toAccountId = to.id, toAmount = received)
+        } else {
+            val cat = categoryId?.takeIf { id -> ledger.category(id)?.type == type } ?: return
+            existing?.copy(
+                type = type, amount = amount, categoryId = cat, date = date, note = note.trim(),
+                accountId = account.id, toAccountId = null, toAmount = 0,
+            ) ?: Transaction(newId(), type, amount, cat, date, note.trim(), accountId = account.id)
+        }
+        vm.saveTransaction(tx, if (type == TxType.TRANSFER) Repeat.NONE else repeat)
         vm.back()
     }
 
@@ -138,31 +171,71 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
             trailing = { TextAction("Save", bold = true) { save() } },
         )
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            val types = listOf(TxType.EXPENSE, TxType.INCOME, TxType.TRANSFER)
             Segmented(
-                listOf("Expense", "Income"), if (type == TxType.EXPENSE) 0 else 1,
+                listOf("Expense", "Income", "Transfer"), types.indexOf(type),
                 Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             ) { i ->
-                val t = if (i == 0) TxType.EXPENSE else TxType.INCOME
+                val t = types[i]
                 if (type != t) {
                     type = t
-                    categoryId = ledger.lastCategory(t)
+                    if (t != TxType.TRANSFER) categoryId = ledger.lastCategory(t)
                 }
             }
 
             Spacer(Modifier.height(8.dp))
             GroupCard {
                 Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Amount", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+                    Text(
+                        if (crossCurrency && type == TxType.TRANSFER) "Amount sent" else "Amount",
+                        style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
+                    )
                     AmountField(
                         amountText, { v -> amountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
-                        ledger.settings.currency, Modifier.focusRequester(focus),
+                        account.currency, Modifier.focusRequester(focus),
                     ) { save() }
                 }
             }
             if (triedSave && amount == null) SectionFooter("Enter an amount.")
 
-            SectionHeader("Category")
-            GroupCard {
+            if (type == TxType.TRANSFER) {
+                SectionHeader("From")
+                AccountPills(ledger, accountId) { accountId = it }
+                SectionHeader("To")
+                if (ledger.accounts.size < 2) {
+                    GroupCard {
+                        ListRow("Add another account in Settings → Accounts to move money between them.", titleColor = palette.secondaryLabel)
+                    }
+                } else {
+                    AccountPills(ledger, toAccount?.id, exclude = accountId) { toAccountId = it }
+                    if (triedSave && toAccount == null) SectionFooter("Choose where the money went.")
+                }
+                if (crossCurrency) {
+                    Spacer(Modifier.height(12.dp))
+                    GroupCard {
+                        Column(
+                            Modifier.fillMaxWidth().tap { runCatching { toFocus.requestFocus() } }.padding(vertical = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("Amount received", style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+                            AmountField(
+                                toAmountText, { v -> toAmountText = v.filter { it.isDigit() || it == '.' || it == ',' }.take(16) },
+                                toAccount!!.currency, Modifier.focusRequester(toFocus),
+                            ) { save() }
+                        }
+                    }
+                    SectionFooter(
+                        if (triedSave && toAmount == null) "Enter what arrived in ${toAccount!!.name}."
+                        else "What arrived in ${toAccount!!.name}, in its currency. Nothing is converted.",
+                    )
+                }
+            } else {
+                SectionHeader("Account")
+                AccountPills(ledger, accountId) { accountId = it }
+            }
+
+            if (type != TxType.TRANSFER) SectionHeader("Category")
+            if (type != TxType.TRANSFER) GroupCard {
                 FlowRow(
                     Modifier.padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -205,8 +278,12 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
                 )
             }
 
-            SectionHeader("Repeat")
-            if (existing == null) {
+            if (type == TxType.TRANSFER) {
+                // Transfers are one-offs.
+            } else if (existing?.type == TxType.TRANSFER) {
+                // A transfer being turned into an expense or income doesn't start repeating.
+            } else if (existing == null) {
+                SectionHeader("Repeat")
                 GroupCard {
                     FlowRow(
                         Modifier.padding(12.dp),
@@ -226,6 +303,7 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
                     )
                 }
             } else if (recurring != null) {
+                SectionHeader("Repeat")
                 GroupCard {
                     ListRow(
                         "${recurring.repeat.label}, next on ${shortDate(recurring.nextDate, today)}",
@@ -236,6 +314,7 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
                 }
                 SectionFooter("Changes here apply to this entry only.")
             } else {
+                SectionHeader("Repeat")
                 GroupCard {
                     ListRow(if (existing.recurringId != null) "Logged by a repeat that has been stopped" else "Doesn't repeat", titleColor = palette.secondaryLabel)
                 }
@@ -302,6 +381,26 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
             vm.saveCategory(c)
             categoryId = c.id
             newCategory = false
+        }
+    }
+}
+
+/** The accounts to pick from as pills; with more than one currency, each shows its currency. */
+@Composable
+private fun AccountPills(ledger: Ledger, selected: String?, exclude: String? = null, onPick: (String) -> Unit) {
+    val showCurrency = ledger.currencies().size > 1
+    GroupCard {
+        FlowRow(
+            Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ledger.accounts.filter { it.id != exclude }.forEach { a ->
+                Pill(
+                    "${a.type.emoji}  ${a.name}" + if (showCurrency) "  ${a.currency.trim()}" else "",
+                    a.id == selected,
+                ) { onPick(a.id) }
+            }
         }
     }
 }

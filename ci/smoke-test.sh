@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs inside the Android emulator job: installs the APK and checks that you can log an expense
 # and an income, set up a repeating one, set a budget and see what's left, read the reports,
-# delete an entry, keep everything after the app is closed, and use the launcher shortcut.
+# delete an entry, keep everything after the app is closed, add an account in another currency
+# that is kept as its own group, move money between currencies, and use the launcher shortcut.
 # Usage: smoke-test.sh <apk> <output dir>
 set -euo pipefail
 
@@ -203,6 +204,95 @@ dump home
 expect home 'text="+₹50,000"' "entries were lost when the app was closed"
 expect home 'text="Netflix"' "the repeating entry was lost when the app was closed"
 echo "PASS: keeps everything"
+
+echo "--- Accounts and a second currency"
+dump home
+tap home "Settings"
+sleep 2
+dump settings
+tap settings "Accounts"
+sleep 2
+dump accounts
+expect accounts 'text="Cash"' "the Accounts screen doesn't list the Cash account"
+tap accounts "New account"
+sleep 2
+dump newacc
+tap newacc "Name"
+sleep 1
+adb shell input text Chase
+hide_keyboard
+dump newacc
+tap newacc '$'
+sleep 1
+dump newacc
+tap newacc "Save" last
+sleep 2
+dump accounts
+shot 8-accounts
+expect accounts 'text="Chase"' "the new account isn't listed"
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+dump settings
+tap settings "Home"
+sleep 2
+dump home
+expect home 'text="$"' "Home has no currency switcher after adding a dollar account"
+echo "PASS: adds an account in another currency"
+
+echo "--- Income in dollars stays in its own group"
+tap home "Income" last
+sleep 2
+adb shell input text 1000
+hide_keyboard
+dump inc
+tap inc "Chase"
+sleep 1
+dump inc
+tap inc "Save"
+sleep 2
+dump home
+has home 'text="+$1,000"' && fail "dollar income shows in the rupee group"
+tap home '$'
+sleep 2
+dump home
+shot 9-dollars
+expect home 'text="+$1,000"' "the dollar income isn't in the dollar group"
+expect home 'text="$1,000"' "the dollar balance isn't shown"
+echo "PASS: each currency is its own group"
+
+echo "--- Transfer from dollars to rupees"
+tap home "Expense"
+sleep 2
+adb shell input text 500
+hide_keyboard
+dump tr
+tap tr "Transfer"
+sleep 1
+dump tr
+tap tr "Chase" first
+sleep 1
+dump tr
+tap tr "Cash" last
+sleep 1
+dump tr
+expect tr 'text="Amount received"' "a transfer between currencies doesn't ask what arrived"
+tap tr "Amount received"
+sleep 1
+adb shell input text 42000
+hide_keyboard
+dump tr
+shot 10-transfer
+tap tr "Save"
+sleep 2
+dump home
+expect home 'text="−$500"' "the transfer isn't shown going out of the dollar group"
+expect home 'text="+$1,000"' "the transfer changed the dollar income"
+tap home "₹"
+sleep 2
+dump home
+shot 11-rupees-after-transfer
+expect home 'text="+₹42,000"' "the transfer isn't shown arriving in the rupee group"
+echo "PASS: transfers between currencies"
 
 echo "--- Launcher shortcut"
 adb shell am start -W -a io.github.akrishna87.selavu.ADD_EXPENSE -n "$PKG/.MainActivity"

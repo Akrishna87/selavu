@@ -18,7 +18,13 @@ fun List<Transaction>.totals() = Totals(
 
 data class DayGroup(val date: LocalDate, val transactions: List<Transaction>) {
     /** Income minus spending on this day. */
-    val net: Long get() = transactions.sumOf { if (it.type == TxType.INCOME) it.amount else -it.amount }
+    val net: Long get() = transactions.sumOf {
+        when (it.type) {
+            TxType.INCOME -> it.amount
+            TxType.EXPENSE -> -it.amount
+            TxType.TRANSFER -> 0L
+        }
+    }
 }
 
 /** Newest day first; within a day, the most recently added first. */
@@ -91,16 +97,64 @@ data class BudgetStatus(
 }
 
 /**
- * The budget for the week or month containing [date], or null when no budget is set.
+ * The [currency]'s budget for the week or month containing [date], or null when that currency
+ * has no budget. Only spending in that currency counts.
  */
-fun Ledger.budgetFor(date: LocalDate, today: LocalDate): BudgetStatus? {
-    if (settings.budget <= 0) return null
-    val type = if (settings.budgetPeriod == BudgetPeriod.WEEKLY) PeriodType.WEEK else PeriodType.MONTH
+fun Ledger.budgetFor(date: LocalDate, today: LocalDate, currency: String = settings.currency): BudgetStatus? {
+    val budget = settings.budgets[currency]?.takeIf { it.amount > 0 } ?: return null
+    val type = if (budget.period == BudgetPeriod.WEEKLY) PeriodType.WEEK else PeriodType.MONTH
     val period = Period.of(type, date, settings.weekStart())
-    val spent = transactions.inPeriod(period).filter { it.type == TxType.EXPENSE }.sumOf { it.amount }
+    val spent = inCurrency(currency).inPeriod(period).filter { it.type == TxType.EXPENSE }.sumOf { it.amount }
     val daysLeft = if (today in period) (ChronoUnit.DAYS.between(today, period.end) + 1).toInt() else 0
-    return BudgetStatus(period, settings.budget, spent, daysLeft)
+    return BudgetStatus(period, budget.amount, spent, daysLeft)
 }
+
+/**
+ * The entries that belong to a currency group: those in its accounts, plus transfers that
+ * arrived in one of its accounts from another currency.
+ */
+fun Ledger.inCurrency(currency: String): List<Transaction> = transactions.filter { t ->
+    currencyOf(t) == currency || (t.type == TxType.TRANSFER && account(t.toAccountId)?.currency == currency)
+}
+
+/**
+ * What an entry did to the money in [currency]: minus for spending or money sent out,
+ * plus for income or money received, null for a transfer between two accounts of that currency.
+ */
+fun Ledger.flow(t: Transaction, currency: String): Long? = when (t.type) {
+    TxType.EXPENSE -> -t.amount
+    TxType.INCOME -> t.amount
+    TxType.TRANSFER -> {
+        val from = currencyOf(t)
+        val to = account(t.toAccountId)?.currency
+        when {
+            from == to -> null
+            from == currency -> -t.amount
+            else -> t.toAmount
+        }
+    }
+}
+
+/** An account's balance now: its opening balance plus everything in and out of it. */
+fun Ledger.balance(accountId: String): Long {
+    val opening = account(accountId)?.opening ?: 0
+    return opening + transactions.sumOf { t ->
+        when {
+            t.type == TxType.TRANSFER && t.accountId == accountId && t.toAccountId == accountId -> 0L
+            t.type == TxType.TRANSFER && t.accountId == accountId -> -t.amount
+            t.type == TxType.TRANSFER && t.toAccountId == accountId -> t.toAmount
+            t.accountId != accountId -> 0L
+            t.type == TxType.INCOME -> t.amount
+            else -> -t.amount
+        }
+    }
+}
+
+/** The account used most recently for [type] (new entries start there), else the main currency's first. */
+fun Ledger.lastAccount(type: TxType): String =
+    transactions.lastOrNull { it.type == type && account(it.accountId) != null }?.accountId
+        ?: accounts(settings.currency).firstOrNull()?.id
+        ?: accounts.first().id
 
 /** The category used most recently for [type], to pre-select it for the next entry. */
 fun Ledger.lastCategory(type: TxType): String? =

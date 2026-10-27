@@ -18,7 +18,7 @@ fun Ledger.logDueRecurring(today: LocalDate, id: () -> String = ::newId): Ledger
         var n = r.logged
         var count = 0
         while (count < MAX_CATCH_UP && !r.occurrence(n).isAfter(today)) {
-            added += Transaction(id(), r.type, r.amount, r.categoryId, r.occurrence(n), r.note, r.id)
+            added += Transaction(id(), r.type, r.amount, r.categoryId, r.occurrence(n), r.note, r.id, r.accountId)
             n++
             count++
         }
@@ -34,8 +34,9 @@ fun Ledger.logDueRecurring(today: LocalDate, id: () -> String = ::newId): Ledger
 fun Ledger.save(tx: Transaction, repeat: Repeat, today: LocalDate, id: () -> String = ::newId): Ledger {
     val exists = transactions.any { it.id == tx.id }
     if (exists) return copy(transactions = transactions.map { if (it.id == tx.id) tx else it })
-    if (repeat == Repeat.NONE) return copy(transactions = transactions + tx)
-    val r = Recurring(id(), tx.type, tx.amount, tx.categoryId, tx.note, repeat, tx.date)
+    // Transfers don't repeat.
+    if (repeat == Repeat.NONE || tx.type == TxType.TRANSFER) return copy(transactions = transactions + tx)
+    val r = Recurring(id(), tx.type, tx.amount, tx.categoryId, tx.note, repeat, tx.date, accountId = tx.accountId)
     return if (tx.date.isAfter(today)) copy(recurring = recurring + r)
     else copy(
         transactions = transactions + tx.copy(recurringId = r.id),
@@ -67,3 +68,56 @@ fun Ledger.deleteCategory(categoryId: String, moveTo: String): Ledger {
 }
 
 fun Ledger.usage(categoryId: String): Int = transactions.count { it.categoryId == categoryId }
+
+fun Ledger.saveAccount(account: Account): Ledger =
+    if (accounts.any { it.id == account.id }) copy(accounts = accounts.map { if (it.id == account.id) account else it })
+    else copy(accounts = accounts + account)
+
+/** How many entries (including transfers in or out) and repeats use an account. */
+fun Ledger.accountUsage(accountId: String): Int =
+    transactions.count { it.accountId == accountId || it.toAccountId == accountId } +
+        recurring.count { it.accountId == accountId }
+
+/**
+ * Removes an account, moving its entries and repeats to [moveTo], which must be in the same
+ * currency (amounts aren't converted). A transfer that would then go from an account to itself
+ * is dropped. The last account can't be removed.
+ */
+fun Ledger.deleteAccount(accountId: String, moveTo: String?): Ledger {
+    val acc = account(accountId) ?: return this
+    if (accounts.size <= 1) return this
+    val target = account(moveTo)
+    if (accountUsage(accountId) > 0 && (target == null || target.id == accountId || target.currency != acc.currency)) return this
+    val to = target?.id ?: accountId
+    val moved = transactions.map { t ->
+        t.copy(
+            accountId = if (t.accountId == accountId) to else t.accountId,
+            toAccountId = if (t.toAccountId == accountId) to else t.toAccountId,
+        )
+    }.filterNot { it.type == TxType.TRANSFER && it.accountId == it.toAccountId }
+    var settings = settings
+    if (settings.currency == acc.currency && accounts.none { it.id != accountId && it.currency == acc.currency }) {
+        settings = settings.copy(currency = accounts.first { it.id != accountId }.currency)
+    }
+    return copy(
+        accounts = accounts.filterNot { it.id == accountId },
+        transactions = moved,
+        recurring = recurring.map { if (it.accountId == accountId) it.copy(accountId = to) else it },
+        settings = settings,
+    )
+}
+
+/**
+ * Makes [currency] the main one. With only one currency in use this just relabels it, accounts
+ * and budget included (amounts aren't converted); with several it picks which group Home opens on.
+ */
+fun Ledger.setMainCurrency(currency: String): Ledger {
+    val old = settings.currency
+    if (currency == old) return this
+    if (currencies().size > 1) return copy(settings = settings.copy(currency = currency))
+    val budgets = settings.budgets[old]?.let { (settings.budgets - old) + (currency to it) } ?: settings.budgets
+    return copy(
+        accounts = accounts.map { it.copy(currency = currency) },
+        settings = settings.copy(currency = currency, budgets = budgets),
+    )
+}

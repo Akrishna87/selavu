@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,7 +49,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.akrishna87.selavu.core.Account
+import io.github.akrishna87.selavu.core.AccountType
 import io.github.akrishna87.selavu.core.Category
+import io.github.akrishna87.selavu.core.Ledger
+import io.github.akrishna87.selavu.core.flow
 import io.github.akrishna87.selavu.core.Money
 import io.github.akrishna87.selavu.core.Period
 import io.github.akrishna87.selavu.core.PeriodType
@@ -255,24 +260,38 @@ fun SettingsIcon(icon: ImageVector, color: Color) {
     }
 }
 
-/** "−₹250" for spending, "+₹250" for income. */
-fun signed(t: Transaction, currency: String) =
-    Money.format(if (t.type == TxType.EXPENSE) -t.amount else t.amount, currency, sign = true)
-
+/**
+ * One entry in a list. Its amount is what it did to the money in [currency] (see [flow]), or
+ * [change] when given, such as what it did to one account.
+ */
 @Composable
-fun TransactionRow(t: Transaction, category: Category?, currency: String, subtitle: String? = null, onClick: () -> Unit) {
+fun TransactionRow(
+    t: Transaction,
+    ledger: Ledger,
+    currency: String,
+    subtitle: String? = null,
+    change: Long? = null,
+    onClick: () -> Unit,
+) {
+    val transfer = t.type == TxType.TRANSFER
+    val category = ledger.category(t.categoryId)
+    // Which account, when there's more than one; for a transfer, from where to where.
+    val accounts = if (transfer) "${ledger.account(t.accountId)?.name ?: "?"} → ${ledger.account(t.toAccountId)?.name ?: "?"}"
+    else ledger.account(t.accountId)?.name?.takeIf { ledger.accounts.size > 1 }
+    val flow = change ?: ledger.flow(t, currency)
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).tap(onClick).padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryIcon(category)
+        if (transfer) TransferIcon() else CategoryIcon(category)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                category?.name ?: "Deleted category", style = MaterialTheme.typography.bodyLarge, color = palette.label,
+                if (transfer) "Transfer" else category?.name ?: "Deleted category",
+                style = MaterialTheme.typography.bodyLarge, color = palette.label,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            val second = listOfNotNull(subtitle, t.note.takeIf { it.isNotBlank() }).joinToString(" · ")
+            val second = listOfNotNull(subtitle, accounts, t.note.takeIf { it.isNotBlank() }).joinToString(" · ")
             if (second.isNotEmpty()) {
                 Text(
                     second, style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel,
@@ -284,8 +303,48 @@ fun TransactionRow(t: Transaction, category: Category?, currency: String, subtit
             Icon(Icons.Rounded.Repeat, contentDescription = "Repeats", Modifier.size(15.dp), tint = palette.tertiaryLabel)
             Spacer(Modifier.width(6.dp))
         }
-        Text(signed(t, currency), style = MaterialTheme.typography.bodyLarge, color = amountColor(t.type == TxType.EXPENSE))
+        Text(
+            if (flow == null) Money.format(t.amount, currency) else Money.format(flow, currency, sign = true),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (flow != null && flow > 0) palette.green else palette.label,
+        )
     }
+}
+
+@Composable
+fun TransferIcon(size: Dp = 34.dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * 0.26f)).background(palette.fill),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = palette.secondaryLabel, modifier = Modifier.size(size * 0.6f))
+    }
+}
+
+@Composable
+fun AccountIcon(account: Account?, size: Dp = 34.dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size * 0.26f)).background(palette.fill),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(account?.type?.emoji ?: "🗂️", fontSize = (size.value * 0.52f).sp)
+    }
+}
+
+/** An account's balance as people say it: what a credit card is owed, what anything else holds. */
+fun balanceText(account: Account, balance: Long): String = when {
+    account.type == AccountType.CARD && balance < 0 -> "${Money.format(-balance, account.currency)} owed"
+    else -> Money.format(balance, account.currency)
+}
+
+/** Switches between currency groups; shown only when there's more than one. */
+@Composable
+fun CurrencySwitcher(currencies: List<String>, current: String, onChoose: (String) -> Unit) {
+    if (currencies.size < 2) return
+    Segmented(
+        currencies.map { it.trim() }, currencies.indexOf(current).coerceAtLeast(0),
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+    ) { onChoose(currencies[it]) }
 }
 
 /** A row in a settings-style card: icon, title, grey value on the right, and a chevron. */

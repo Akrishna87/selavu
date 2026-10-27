@@ -2,7 +2,32 @@ package io.github.akrishna87.selavu.core
 
 import java.time.LocalDate
 
-enum class TxType { EXPENSE, INCOME }
+/** Spending, income, or money moved between two of your own accounts. */
+enum class TxType { EXPENSE, INCOME, TRANSFER }
+
+enum class AccountType(val label: String, val emoji: String) {
+    BANK("Bank", "🏦"),
+    CARD("Credit card", "💳"),
+    CASH("Cash", "💵"),
+    WALLET("Wallet", "📱"),
+    OTHER("Other", "🗂️"),
+}
+
+/**
+ * Where money is kept. Each account has its own [currency]; entries in it are in that currency,
+ * and totals are only ever added up within one currency.
+ * [opening] is the balance before the first entry; for a credit card it's minus what was owed.
+ */
+data class Account(
+    val id: String,
+    val name: String,
+    val type: AccountType,
+    val currency: String,
+    val opening: Long = 0,
+)
+
+/** The account everything goes into until others are added (and that older data is moved into). */
+const val DEFAULT_ACCOUNT = "cash"
 
 data class Category(
     val id: String,
@@ -13,7 +38,11 @@ data class Category(
     val color: Long,
 )
 
-/** One expense or income. [amount] is in the currency's smallest unit (paise, cents). */
+/**
+ * One expense, income or transfer. [amount] is in the smallest unit (paise, cents) of the
+ * account's currency. A transfer moves [amount] out of [accountId] and [toAmount] (in the other
+ * account's currency, which may differ) into [toAccountId]; it has no category.
+ */
 data class Transaction(
     val id: String,
     val type: TxType,
@@ -23,6 +52,9 @@ data class Transaction(
     val note: String = "",
     /** Set when this was logged by a [Recurring] item. */
     val recurringId: String? = null,
+    val accountId: String = DEFAULT_ACCOUNT,
+    val toAccountId: String? = null,
+    val toAmount: Long = 0,
 )
 
 enum class Repeat(val label: String) {
@@ -48,6 +80,7 @@ data class Recurring(
     val start: LocalDate,
     /** How many occurrences have been logged so far. */
     val logged: Int = 0,
+    val accountId: String = DEFAULT_ACCOUNT,
 ) {
     fun occurrence(n: Int): LocalDate = when (repeat) {
         Repeat.NONE -> start
@@ -62,11 +95,13 @@ data class Recurring(
 
 enum class BudgetPeriod { WEEKLY, MONTHLY }
 
+data class Budget(val amount: Long, val period: BudgetPeriod = BudgetPeriod.MONTHLY)
+
 data class Settings(
+    /** The main currency: what Home opens on, and what new accounts start in. */
     val currency: String = "₹",
-    /** 0 means no budget. */
-    val budget: Long = 0,
-    val budgetPeriod: BudgetPeriod = BudgetPeriod.MONTHLY,
+    /** A spending budget for each currency that has one. */
+    val budgets: Map<String, Budget> = emptyMap(),
     val weekStartsMonday: Boolean = true,
 )
 
@@ -75,9 +110,26 @@ data class Ledger(
     val transactions: List<Transaction> = emptyList(),
     val recurring: List<Recurring> = emptyList(),
     val settings: Settings = Settings(),
+    val accounts: List<Account> = listOf(Account(DEFAULT_ACCOUNT, "Cash", AccountType.CASH, settings.currency)),
 ) {
     fun category(id: String): Category? = categories.firstOrNull { it.id == id }
     fun categories(type: TxType): List<Category> = categories.filter { it.type == type }
+    fun account(id: String?): Account? = accounts.firstOrNull { it.id == id }
+
+    /** The currency an entry is in: its account's (for a transfer, the account it left). */
+    fun currencyOf(t: Transaction): String = account(t.accountId)?.currency ?: settings.currency
+
+    /** Every currency with an account, the main one first. */
+    fun currencies(): List<String> =
+        (listOf(settings.currency) + accounts.map { it.currency }).distinct()
+            .filter { c -> c == settings.currency || accounts.any { it.currency == c } }
+
+    fun accounts(currency: String): List<Account> = accounts.filter { it.currency == currency }
+}
+
+/** Common currencies offered when choosing one; any other symbol can be typed. */
+object Currencies {
+    val common = listOf("₹", "$", "€", "£", "¥", "AED ", "S$", "RM ", "A$", "C$", "SAR ", "QAR ")
 }
 
 object CategoryColors {

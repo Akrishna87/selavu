@@ -111,7 +111,7 @@ class LedgerTest {
     @Test fun budgetLeftAndPerDay() {
         val l = Ledger(
             transactions = listOf(tx(4000_00, today), tx(1000_00, today.minusDays(3)), tx(999_00, today.minusMonths(1))),
-            settings = Settings(budget = 20000_00, budgetPeriod = BudgetPeriod.MONTHLY),
+            settings = Settings(budgets = mapOf("₹" to Budget(20000_00, BudgetPeriod.MONTHLY))),
         )
         val b = l.budgetFor(today, today)!!
         assertEquals(5000_00L, b.spent)
@@ -213,5 +213,135 @@ class CsvTest {
         assertEquals(1, r.added)
         assertEquals(2, r.failed)
         assertEquals("Pets", r.ledger.category(r.ledger.transactions.single().categoryId)!!.name)
+    }
+}
+
+class AccountsTest {
+    private val today = LocalDate.of(2026, 10, 27)
+    private val inr = Account("hdfc", "HDFC", AccountType.BANK, "₹", 10_000_00)
+    private val card = Account("amex", "Amex", AccountType.CARD, "₹", -2_000_00)
+    private val usd = Account("chase", "Chase", AccountType.BANK, "$")
+    private val base = Ledger(accounts = listOf(Account(DEFAULT_ACCOUNT, "Cash", AccountType.CASH, "₹"), inr, card, usd))
+
+    private fun tx(type: TxType, amount: Long, account: String, cat: String = if (type == TxType.INCOME) "salary" else "food") =
+        Transaction(newId(), type, amount, cat, today, accountId = account)
+
+    private fun transfer(from: String, amount: Long, to: String, toAmount: Long) =
+        Transaction(newId(), TxType.TRANSFER, amount, "", today, accountId = from, toAccountId = to, toAmount = toAmount)
+
+    @Test fun olderLedgersGetACashAccount() {
+        val l = Ledger(settings = Settings(currency = "$"))
+        assertEquals("$", l.accounts.single().currency)
+        assertEquals(DEFAULT_ACCOUNT, Transaction("t", TxType.EXPENSE, 1, "food", today).accountId)
+    }
+
+    @Test fun currenciesAreGroupsMainFirst() {
+        assertEquals(listOf("₹", "$"), base.currencies())
+        assertEquals(listOf("$", "₹"), base.copy(settings = Settings(currency = "$")).currencies())
+    }
+
+    @Test fun totalsNeverMixCurrencies() {
+        val l = base.copy(transactions = listOf(
+            tx(TxType.INCOME, 5_000_00, "chase"), tx(TxType.EXPENSE, 100_00, "chase"),
+            tx(TxType.EXPENSE, 300_00, "hdfc"), tx(TxType.INCOME, 1_000_00, DEFAULT_ACCOUNT),
+        ))
+        val usdTotals = l.inCurrency("$").totals()
+        assertEquals(5_000_00L, usdTotals.income)
+        assertEquals(100_00L, usdTotals.expense)
+        val inrTotals = l.inCurrency("₹").totals()
+        assertEquals(1_000_00L, inrTotals.income)
+        assertEquals(300_00L, inrTotals.expense)
+    }
+
+    @Test fun transfersMoveMoneyButAreNotSpendingOrIncome() {
+        // $1,000 sent home arrives as ₹84,000; then ₹5,000 pays off part of the card.
+        val l = base.copy(transactions = listOf(
+            tx(TxType.INCOME, 2_000_00, "chase"),
+            transfer("chase", 1_000_00, "hdfc", 84_000_00),
+            transfer("hdfc", 5_000_00, "amex", 5_000_00),
+        ))
+        assertEquals(1_000_00L, l.balance("chase"))
+        assertEquals(10_000_00L + 84_000_00 - 5_000_00, l.balance("hdfc"))
+        assertEquals(-2_000_00L + 5_000_00, l.balance("amex"))
+        assertEquals(0L, l.inCurrency("₹").totals().income)
+        assertEquals(0L, l.inCurrency("$").totals().expense)
+        // The cross-currency transfer shows in both groups, the same-currency one only in ₹.
+        assertEquals(2, l.inCurrency("$").size)
+        assertEquals(2, l.inCurrency("₹").size)
+        val sent = l.transactions[1]
+        assertEquals(-1_000_00L, l.flow(sent, "$"))
+        assertEquals(84_000_00L, l.flow(sent, "₹"))
+        assertNull(l.flow(l.transactions[2], "₹"))
+        assertEquals(0L, l.inCurrency("₹").byDay().single().net)
+    }
+
+    @Test fun budgetsArePerCurrency() {
+        val l = base.copy(
+            transactions = listOf(tx(TxType.EXPENSE, 100_00, "chase"), tx(TxType.EXPENSE, 400_00, "hdfc")),
+            settings = Settings(budgets = mapOf("$" to Budget(1_000_00), "₹" to Budget(20_000_00, BudgetPeriod.WEEKLY))),
+        )
+        assertEquals(100_00L, l.budgetFor(today, today, "$")!!.spent)
+        val inr = l.budgetFor(today, today, "₹")!!
+        assertEquals(400_00L, inr.spent)
+        assertEquals(PeriodType.WEEK, inr.period.type)
+        assertNull(l.budgetFor(today, today, "€"))
+    }
+
+    @Test fun repeatsLogIntoTheirAccount() {
+        val l = base.save(tx(TxType.INCOME, 3_000_00, "chase").copy(date = today.minusMonths(1)), Repeat.MONTHLY, today)
+        assertEquals(2, l.transactions.size)
+        assertTrue(l.transactions.all { it.accountId == "chase" })
+    }
+
+    @Test fun deletingAnAccountMovesItsEntriesWithinTheCurrency() {
+        val l = base.copy(transactions = listOf(tx(TxType.EXPENSE, 1_00, "hdfc"), transfer("hdfc", 1_00, "amex", 1_00)))
+        // Not into another currency, and not with nowhere to go.
+        assertEquals(l, l.deleteAccount("hdfc", "chase"))
+        assertEquals(l, l.deleteAccount("hdfc", null))
+        val after = l.deleteAccount("hdfc", "amex")
+        assertNull(after.account("hdfc"))
+        assertEquals(1, after.transactions.size) // the transfer would now be Amex → Amex
+        assertEquals("amex", after.transactions.single().accountId)
+        // An unused account just goes; the last one stays.
+        assertNull(l.deleteAccount("chase", null).account("chase"))
+        val one = Ledger()
+        assertEquals(one, one.deleteAccount(DEFAULT_ACCOUNT, null))
+    }
+
+    @Test fun mainCurrency() {
+        // One currency: relabels it everywhere.
+        val one = Ledger(settings = Settings(budgets = mapOf("₹" to Budget(5_00))))
+        val relabelled = one.setMainCurrency("$")
+        assertEquals("$", relabelled.accounts.single().currency)
+        assertEquals(Budget(5_00), relabelled.settings.budgets["$"])
+        // Several: only picks the main group.
+        val several = base.setMainCurrency("$")
+        assertEquals("$", several.settings.currency)
+        assertEquals("₹", several.account("hdfc")!!.currency)
+    }
+
+    @Test fun lastAccountIsPreselected() {
+        val l = base.copy(transactions = listOf(tx(TxType.INCOME, 1, "chase")))
+        assertEquals("chase", l.lastAccount(TxType.INCOME))
+        assertEquals(DEFAULT_ACCOUNT, l.lastAccount(TxType.EXPENSE))
+    }
+
+    @Test fun csvKeepsAccountsCurrenciesAndTransfers() {
+        val l = base.copy(transactions = listOf(
+            tx(TxType.INCOME, 2_000_00, "chase"),
+            transfer("chase", 1_000_00, "hdfc", 84_000_00),
+            tx(TxType.EXPENSE, 250_00, "amex"),
+        ))
+        val csv = Csv.export(l)
+        assertTrue(csv.contains("Transfer,,1000,$,Chase,HDFC,₹,84000,"))
+        val back = Csv.import(Ledger(), csv).ledger
+        assertEquals(3, back.transactions.size)
+        val chase = back.accounts.first { it.name == "Chase" }
+        assertEquals("$", chase.currency)
+        assertEquals(1_000_00L, back.balance(chase.id))
+        val t = back.transactions.first { it.type == TxType.TRANSFER }
+        assertEquals("HDFC", back.account(t.toAccountId)!!.name)
+        assertEquals(84_000_00L, t.toAmount)
+        assertEquals(0, Csv.import(back, csv).added)
     }
 }
