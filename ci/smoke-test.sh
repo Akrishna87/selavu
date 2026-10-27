@@ -54,6 +54,16 @@ tap() { # tap <dump name> <text> [first|last]
   adb shell input tap $xy
 }
 has() { grep -qF "$2" "$OUT/$1.xml"; }
+# Scrolls down until <text> is on screen (re-reading the screen into <dump name>), for tall forms.
+scroll_to() { # scroll_to <dump name> <text>
+  local i
+  for i in 1 2 3 4; do
+    python3 "$HERE/find_text.py" "$OUT/$1.xml" "$2" > /dev/null 2>&1 && return 0
+    adb shell input swipe 540 1700 540 700 300
+    sleep 1
+    dump "$1"
+  done
+}
 expect() { has "$1" "$2" || fail "$3"; }
 hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"; then adb shell input keyevent KEYCODE_BACK; sleep 1; fi; }
 
@@ -187,6 +197,7 @@ tap home "Groceries"
 sleep 2
 dump edit
 expect edit 'text="Edit expense"' "tapping an entry didn't open it"
+scroll_to edit "Delete"
 tap edit "Delete"
 sleep 1
 dump confirm
@@ -275,6 +286,7 @@ dump tr
 tap tr "Cash" last
 sleep 1
 dump tr
+scroll_to tr "Amount received"
 expect tr 'text="Amount received"' "a transfer between currencies doesn't ask what arrived"
 tap tr "Amount received"
 sleep 1
