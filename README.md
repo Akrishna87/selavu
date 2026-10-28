@@ -31,6 +31,14 @@ permission.
   both sides, what was sent and what arrived
 - The main currency is the group Home and Reports open on
 
+**Credit cards**
+- Optional credit limit (with the credit available), statement day and due day
+- Each bill: what was owed on the statement date, what's been paid since, and what's left, with
+  "₹3,000 due 5 Nov", due soon in orange and overdue in red on Home
+- **Pay bill** opens a transfer into the card with the amount due filled in
+- **Card bill reminders** (Settings): a notification from three days before the due date while
+  something is still unpaid, checked once a day on the phone
+
 **Budget**
 - A spending budget per currency, weekly or monthly
 - Home shows how much is left, a bar that turns amber then red, and how much you can spend a day for

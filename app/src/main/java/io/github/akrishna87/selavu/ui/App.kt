@@ -77,7 +77,7 @@ fun SelavuApp(vm: AppViewModel, onExit: () -> Unit) {
             Screen.Repeating -> RepeatingScreen(vm, l, padding)
             Screen.Accounts -> AccountsScreen(vm, l, padding)
             is Screen.AccountDetail -> AccountDetailScreen(vm, l, s.accountId, padding)
-            is Screen.Edit -> androidx.compose.runtime.key(s) { EditScreen(vm, l, s.type, s.txId, padding) }
+            is Screen.Edit -> androidx.compose.runtime.key(s) { EditScreen(vm, l, s.type, s.txId, padding, s.toAccountId, s.amount) }
             is Screen.CategoryDetail -> CategoryDetailScreen(vm, l, s.categoryId, padding)
         }
     }

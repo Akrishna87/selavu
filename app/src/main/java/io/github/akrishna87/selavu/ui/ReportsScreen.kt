@@ -48,6 +48,9 @@ import io.github.akrishna87.selavu.core.TxType
 import io.github.akrishna87.selavu.core.averagePerDay
 import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.byCategory
+import io.github.akrishna87.selavu.core.cardBill
+import io.github.akrishna87.selavu.core.change
+import io.github.akrishna87.selavu.core.shortDate
 import io.github.akrishna87.selavu.core.dayHeading
 import io.github.akrishna87.selavu.core.inCurrency
 import io.github.akrishna87.selavu.core.inPeriod
@@ -296,6 +299,7 @@ fun AccountDetailScreen(vm: AppViewModel, ledger: Ledger, accountId: String, pad
                     }
                 }
             }
+            if (account.type == AccountType.CARD) item { CardSection(vm, ledger, account, today) }
             item { SectionHeader("${entries.size} ${if (entries.size == 1) "entry" else "entries"}") }
             if (entries.isEmpty()) {
                 item { EmptyState(account.type.emoji, "Nothing in this account yet", "Pick it when adding an expense, income or transfer.") }
@@ -305,13 +309,7 @@ fun AccountDetailScreen(vm: AppViewModel, ledger: Ledger, accountId: String, pad
                         entries.forEachIndexed { i, t ->
                             if (i > 0) RowDivider(inset = 62.dp)
                             // Amounts are shown as they changed this account's balance, in its currency.
-                            val change = when {
-                                t.type == TxType.TRANSFER && t.accountId == accountId -> -t.amount
-                                t.type == TxType.TRANSFER -> t.toAmount
-                                t.type == TxType.INCOME -> t.amount
-                                else -> -t.amount
-                            }
-                            TransactionRow(t, ledger, account.currency, subtitle = dayHeading(t.date, today), change = change) {
+                            TransactionRow(t, ledger, account.currency, subtitle = dayHeading(t.date, today), change = change(t, accountId)) {
                                 vm.open(Screen.Edit(t.type, t.id))
                             }
                         }
@@ -319,5 +317,43 @@ fun AccountDetailScreen(vm: AppViewModel, ledger: Ledger, accountId: String, pad
                 }
             }
         }
+    }
+}
+
+/** A credit card's limit, its current bill, and a button to pay it. */
+@Composable
+private fun CardSection(vm: AppViewModel, ledger: Ledger, card: io.github.akrishna87.selavu.core.Account, today: LocalDate) {
+    val owed = (-ledger.balance(card.id)).coerceAtLeast(0)
+    val bill = ledger.cardBill(card.id, today)
+    Column {
+        if (card.limit > 0) {
+            SectionHeader("Credit")
+            GroupCard {
+                ListRow("Credit limit", value = Money.format(card.limit, card.currency))
+                RowDivider()
+                ListRow("Available", value = Money.format(card.limit - owed, card.currency))
+            }
+        }
+        SectionHeader("Bill")
+        GroupCard {
+            if (bill != null) {
+                ListRow("Statement on ${shortDate(bill.statementDate, today)}", value = Money.format(bill.statementOwed, card.currency))
+                RowDivider()
+                ListRow("Paid since", value = Money.format(bill.paid, card.currency))
+                RowDivider()
+                ListRow(
+                    "Due ${shortDate(bill.dueDate, today)}",
+                    value = Money.format(bill.remaining, card.currency),
+                    subtitle = billLine(bill, card.currency, today),
+                    subtitleColor = billColor(bill, today),
+                )
+                RowDivider()
+            }
+            val toPay = bill?.remaining?.takeIf { it > 0 } ?: owed.takeIf { it > 0 }
+            ListRow("Pay bill", titleColor = palette.tint, chevron = false) {
+                vm.open(Screen.Edit(TxType.TRANSFER, toAccountId = card.id, amount = toPay))
+            }
+        }
+        if (bill == null) SectionFooter("Set the statement and due days for this card in Settings → Accounts to see each bill and when it's due.")
     }
 }

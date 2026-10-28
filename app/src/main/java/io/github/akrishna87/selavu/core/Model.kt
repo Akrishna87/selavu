@@ -24,6 +24,12 @@ data class Account(
     val type: AccountType,
     val currency: String,
     val opening: Long = 0,
+    /** Credit cards: the credit limit (0 when not set). */
+    val limit: Long = 0,
+    /** Credit cards: the day of the month the statement is made, 1–31 (the month's last day in shorter ones). */
+    val statementDay: Int? = null,
+    /** Credit cards: the day of the month the bill is due, after the statement day. */
+    val dueDay: Int? = null,
 )
 
 /** The account everything goes into until others are added (and that older data is moved into). */
@@ -103,6 +109,8 @@ data class Settings(
     /** A spending budget for each currency that has one. */
     val budgets: Map<String, Budget> = emptyMap(),
     val weekStartsMonday: Boolean = true,
+    /** Notify before a credit card bill is due. */
+    val billReminders: Boolean = false,
 )
 
 data class Ledger(

@@ -102,11 +102,19 @@ private fun AmountField(value: String, onChange: (String) -> Unit, currency: Str
 
 /** Adding a new expense, income or transfer, or changing one ([txId] set). */
 @Composable
-fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String?, padding: PaddingValues) {
+fun EditScreen(
+    vm: AppViewModel,
+    ledger: Ledger,
+    startType: TxType,
+    txId: String?,
+    padding: PaddingValues,
+    payInto: String? = null,
+    startAmount: Long? = null,
+) {
     val existing = remember(txId) { txId?.let { id -> ledger.transactions.firstOrNull { it.id == id } } }
     val today = LocalDate.now()
     var type by rememberSaveable { mutableStateOf(existing?.type ?: startType) }
-    var amountText by rememberSaveable { mutableStateOf(existing?.let { Money.plain(it.amount) } ?: "") }
+    var amountText by rememberSaveable { mutableStateOf(existing?.let { Money.plain(it.amount) } ?: startAmount?.let { Money.plain(it) } ?: "") }
     var categoryId by rememberSaveable { mutableStateOf(existing?.categoryId ?: ledger.lastCategory(startType)) }
     var dateEpoch by rememberSaveable { mutableStateOf((existing?.date ?: vm.defaultDate()).toEpochDay()) }
     var note by rememberSaveable { mutableStateOf(existing?.note ?: "") }
@@ -117,9 +125,20 @@ fun EditScreen(vm: AppViewModel, ledger: Ledger, startType: TxType, txId: String
         val last = ledger.lastAccount(t)
         return if (ledger.account(last)?.currency == group) last else ledger.accounts(group).firstOrNull()?.id ?: last
     }
-    var accountId by rememberSaveable { mutableStateOf(existing?.accountId ?: startAccount(startType)) }
+    // Paying a card bill starts from an account in the card's currency, other than the card.
+    val payCurrency = ledger.account(payInto)?.currency
+    var accountId by rememberSaveable {
+        mutableStateOf(
+            existing?.accountId
+                ?: payInto?.let { card ->
+                    ledger.accounts.firstOrNull { it.id != card && it.currency == payCurrency && it.type != io.github.akrishna87.selavu.core.AccountType.CARD }?.id
+                        ?: ledger.accounts.firstOrNull { it.id != card }?.id
+                }
+                ?: startAccount(startType),
+        )
+    }
     var toAccountId by rememberSaveable {
-        mutableStateOf(existing?.toAccountId ?: ledger.accounts.firstOrNull { it.id != accountId }?.id)
+        mutableStateOf(existing?.toAccountId ?: payInto ?: ledger.accounts.firstOrNull { it.id != accountId }?.id)
     }
     var toAmountText by rememberSaveable { mutableStateOf(existing?.takeIf { it.type == TxType.TRANSFER }?.let { Money.plain(it.toAmount) } ?: "") }
     var showDate by remember { mutableStateOf(false) }

@@ -345,3 +345,48 @@ class AccountsTest {
         assertEquals(0, Csv.import(back, csv).added)
     }
 }
+
+class CardBillTest {
+    private val card = Account("amex", "Amex", AccountType.CARD, "₹", opening = -1_000_00, limit = 50_000_00, statementDay = 15, dueDay = 5)
+    private val bank = Account("hdfc", "HDFC", AccountType.BANK, "₹", 100_000_00)
+    private val base = Ledger(accounts = listOf(bank, card))
+
+    private fun spend(amount: Long, date: LocalDate) = Transaction(newId(), TxType.EXPENSE, amount, "food", date, accountId = "amex")
+    private fun pay(amount: Long, date: LocalDate) =
+        Transaction(newId(), TxType.TRANSFER, amount, "", date, accountId = "hdfc", toAccountId = "amex", toAmount = amount)
+
+    @Test fun daysOfTheMonth() {
+        assertEquals(LocalDate.of(2026, 10, 15), onOrBefore(LocalDate.of(2026, 10, 20), 15))
+        assertEquals(LocalDate.of(2026, 9, 15), onOrBefore(LocalDate.of(2026, 10, 14), 15))
+        assertEquals(LocalDate.of(2026, 2, 28), onOrBefore(LocalDate.of(2026, 3, 1), 31))
+        assertEquals(LocalDate.of(2026, 11, 5), onOrAfter(LocalDate.of(2026, 10, 16), 5))
+        assertEquals(LocalDate.of(2026, 10, 25), onOrAfter(LocalDate.of(2026, 10, 16), 25))
+    }
+
+    @Test fun billIsWhatWasOwedOnTheStatementDateLessPayments() {
+        val today = LocalDate.of(2026, 10, 28)
+        val l = base.copy(transactions = listOf(
+            spend(4_000_00, LocalDate.of(2026, 10, 10)), // on the 15 Oct statement
+            spend(700_00, LocalDate.of(2026, 10, 20)), // on the next one
+            pay(2_000_00, LocalDate.of(2026, 10, 22)),
+        ))
+        val bill = l.cardBill("amex", today)!!
+        assertEquals(LocalDate.of(2026, 10, 15), bill.statementDate)
+        assertEquals(LocalDate.of(2026, 11, 5), bill.dueDate)
+        assertEquals(5_000_00L, bill.statementOwed)
+        assertEquals(2_000_00L, bill.paid)
+        assertEquals(3_000_00L, bill.remaining)
+        assertEquals(8L, bill.daysLeft(today))
+        assertEquals(listOf("amex"), l.billsDueWithin(10, today).map { it.first.id })
+        assertTrue(l.billsDueWithin(3, today).isEmpty())
+        // Paid in full, and then overdue when it isn't.
+        assertEquals(0L, l.copy(transactions = l.transactions + pay(3_000_00, today)).cardBill("amex", today)!!.remaining)
+        assertTrue(bill.overdue(LocalDate.of(2026, 11, 6)))
+        assertEquals(3_700_00L, -l.balance("amex"))
+    }
+
+    @Test fun onlyCardsWithDaysSetHaveBills() {
+        assertNull(base.cardBill("hdfc", LocalDate.of(2026, 10, 28)))
+        assertNull(base.copy(accounts = listOf(card.copy(dueDay = null))).cardBill("amex", LocalDate.of(2026, 10, 28)))
+    }
+}

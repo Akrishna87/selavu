@@ -136,19 +136,72 @@ fun Ledger.flow(t: Transaction, currency: String): Long? = when (t.type) {
 }
 
 /** An account's balance now: its opening balance plus everything in and out of it. */
-fun Ledger.balance(accountId: String): Long {
+fun Ledger.balance(accountId: String): Long = balanceOn(accountId, LocalDate.MAX)
+
+/** An account's balance at the end of [date]: the opening balance plus everything dated up to then. */
+fun Ledger.balanceOn(accountId: String, date: LocalDate): Long {
     val opening = account(accountId)?.opening ?: 0
-    return opening + transactions.sumOf { t ->
-        when {
-            t.type == TxType.TRANSFER && t.accountId == accountId && t.toAccountId == accountId -> 0L
-            t.type == TxType.TRANSFER && t.accountId == accountId -> -t.amount
-            t.type == TxType.TRANSFER && t.toAccountId == accountId -> t.toAmount
-            t.accountId != accountId -> 0L
-            t.type == TxType.INCOME -> t.amount
-            else -> -t.amount
-        }
-    }
+    return opening + transactions.filter { !it.date.isAfter(date) }.sumOf { change(it, accountId) }
 }
+
+/** What [t] did to the balance of [accountId]. */
+fun change(t: Transaction, accountId: String): Long = when {
+    t.type == TxType.TRANSFER && t.accountId == accountId && t.toAccountId == accountId -> 0L
+    t.type == TxType.TRANSFER && t.accountId == accountId -> -t.amount
+    t.type == TxType.TRANSFER && t.toAccountId == accountId -> t.toAmount
+    t.accountId != accountId -> 0L
+    t.type == TxType.INCOME -> t.amount
+    else -> -t.amount
+}
+
+/**
+ * A credit card's current bill: what was owed on the last statement date, what has been paid
+ * into the card since, and when it's due.
+ */
+data class CardBill(
+    val statementDate: LocalDate,
+    val dueDate: LocalDate,
+    val statementOwed: Long,
+    val paid: Long,
+) {
+    val remaining: Long get() = (statementOwed - paid).coerceAtLeast(0)
+    fun overdue(today: LocalDate) = remaining > 0 && today.isAfter(dueDate)
+    fun daysLeft(today: LocalDate): Long = ChronoUnit.DAYS.between(today, dueDate)
+}
+
+/** The bill of a credit card with statement and due days set, as of [today]; null otherwise. */
+fun Ledger.cardBill(accountId: String, today: LocalDate): CardBill? {
+    val a = account(accountId) ?: return null
+    val statementDay = a.statementDay ?: return null
+    val dueDay = a.dueDay ?: return null
+    if (a.type != AccountType.CARD) return null
+    val statement = onOrBefore(today, statementDay)
+    val due = onOrAfter(statement.plusDays(1), dueDay)
+    val owed = (-balanceOn(accountId, statement)).coerceAtLeast(0)
+    val paid = transactions.filter { it.date.isAfter(statement) && !it.date.isAfter(today) }
+        .sumOf { change(it, accountId).coerceAtLeast(0) }
+    return CardBill(statement, due, owed, paid)
+}
+
+/** The day [day] of [month]'s month, or its last day when the month is shorter. */
+private fun dayIn(month: LocalDate, day: Int): LocalDate = month.withDayOfMonth(minOf(day, month.lengthOfMonth()))
+
+/** The latest date on or before [date] falling on day [day] of its month. */
+fun onOrBefore(date: LocalDate, day: Int): LocalDate {
+    val thisMonth = dayIn(date, day)
+    return if (!thisMonth.isAfter(date)) thisMonth else dayIn(date.minusMonths(1), day)
+}
+
+/** The earliest date on or after [date] falling on day [day] of its month. */
+fun onOrAfter(date: LocalDate, day: Int): LocalDate {
+    val thisMonth = dayIn(date, day)
+    return if (!thisMonth.isBefore(date)) thisMonth else dayIn(date.plusMonths(1), day)
+}
+
+/** Cards with something still to pay that is due within [days] days (or already overdue). */
+fun Ledger.billsDueWithin(days: Long, today: LocalDate): List<Pair<Account, CardBill>> =
+    accounts.mapNotNull { a -> cardBill(a.id, today)?.let { a to it } }
+        .filter { (_, b) -> b.remaining > 0 && b.daysLeft(today) <= days }
 
 /** The account used most recently for [type] (new entries start there), else the main currency's first. */
 fun Ledger.lastAccount(type: TxType): String =

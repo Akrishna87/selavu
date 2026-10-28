@@ -64,12 +64,16 @@ class Store(context: Context) {
                     }
                 })
                 put("weekStartsMonday", l.settings.weekStartsMonday)
+                put("billReminders", l.settings.billReminders)
             })
             put("accounts", JSONArray().apply {
                 l.accounts.forEach { a ->
                     put(JSONObject().apply {
                         put("id", a.id); put("name", a.name); put("type", a.type.name)
                         put("currency", a.currency); put("opening", a.opening)
+                        if (a.limit != 0L) put("limit", a.limit)
+                        a.statementDay?.let { put("statementDay", it) }
+                        a.dueDay?.let { put("dueDay", it) }
                     })
                 }
             })
@@ -119,12 +123,18 @@ class Store(context: Context) {
             if (s != null && !s.has("budgets") && s.optLong("budget", 0) > 0) {
                 budgets[currency] = Budget(s.getLong("budget"), enumOr(s.optString("budgetPeriod"), BudgetPeriod.MONTHLY))
             }
-            val settings = Settings(currency, budgets, s?.optBoolean("weekStartsMonday", true) ?: true)
+            val settings = Settings(
+                currency, budgets, s?.optBoolean("weekStartsMonday", true) ?: true,
+                s?.optBoolean("billReminders", false) ?: false,
+            )
             // Version 1 had no accounts: everything goes into one Cash account in its currency.
             val accounts = o.optJSONArray("accounts").objects().map { a ->
                 Account(
                     a.getString("id"), a.getString("name"), enumOr(a.optString("type"), AccountType.OTHER),
                     a.optString("currency", currency), a.optLong("opening", 0),
+                    a.optLong("limit", 0),
+                    if (a.has("statementDay")) a.getInt("statementDay") else null,
+                    if (a.has("dueDay")) a.getInt("dueDay") else null,
                 )
             }.ifEmpty { listOf(Account(DEFAULT_ACCOUNT, "Cash", AccountType.CASH, currency)) }
             val categories = o.optJSONArray("categories").objects().map { c ->

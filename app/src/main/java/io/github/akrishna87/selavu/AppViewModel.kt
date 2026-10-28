@@ -28,6 +28,7 @@ import io.github.akrishna87.selavu.core.save
 import io.github.akrishna87.selavu.core.saveCategory
 import io.github.akrishna87.selavu.core.stopRecurring
 import io.github.akrishna87.selavu.core.weekStart
+import io.github.akrishna87.selavu.data.BillReminderWorker
 import io.github.akrishna87.selavu.data.Store
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +44,8 @@ sealed interface Screen {
     data object Home : Screen
     data object Reports : Screen
     data object Settings : Screen
-    data class Edit(val type: TxType, val txId: String? = null) : Screen
+    /** A new or existing entry; a new one can start with an account to pay into and an amount (Pay bill). */
+    data class Edit(val type: TxType, val txId: String? = null, val toAccountId: String? = null, val amount: Long? = null) : Screen
     data class CategoryDetail(val categoryId: String) : Screen
     data object Categories : Screen
     data object Repeating : Screen
@@ -82,6 +84,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) { store.load() }
             _ledger.value = loaded
+            BillReminderWorker.schedule(app, loaded.settings.billReminders)
             refreshRecurring()
         }
     }
@@ -133,6 +136,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun updateSettings(change: (Settings) -> Settings) = update { it.copy(settings = change(it.settings)) }
     fun saveAccount(a: Account) = update { it.saveAccount(a) }
     fun setMainCurrency(c: String) = update { it.setMainCurrency(c) }
+
+    fun setBillReminders(on: Boolean) {
+        updateSettings { it.copy(billReminders = on) }
+        BillReminderWorker.schedule(getApplication(), on)
+    }
     fun deleteAccount(id: String, moveTo: String?) = update { it.deleteAccount(id, moveTo) }
 
     /** Sets (or, with an amount of 0, removes) a currency's budget. */

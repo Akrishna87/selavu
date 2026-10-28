@@ -2,6 +2,9 @@
 <!-- No INTERNET permission: the ledger never leaves the phone. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Card bill reminders (Android 13+ asks before an app may notify). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

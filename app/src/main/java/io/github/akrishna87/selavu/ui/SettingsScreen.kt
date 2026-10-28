@@ -2,6 +2,8 @@
 
 package io.github.akrishna87.selavu.ui
 
+import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.CurrencyRupee
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material3.AlertDialog
@@ -94,6 +97,9 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(vm::importCsv)
     }
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) vm.message = "Notifications are off for Selavu, so reminders can't be shown. You can allow them in the phone's settings."
+    }
 
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { LargeTitle("Settings") }
@@ -141,22 +147,28 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                     "Weeks start on Monday",
                     icon = { SettingsIcon(Icons.Rounded.CalendarToday, Red) },
                     trailing = {
-                        Switch(
-                            checked = s.weekStartsMonday,
-                            onCheckedChange = { on -> vm.updateSettings { it.copy(weekStartsMonday = on) } },
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = palette.green,
-                                checkedThumbColor = Color.White,
-                                checkedBorderColor = Color.Transparent,
-                                uncheckedTrackColor = palette.fill,
-                                uncheckedThumbColor = Color.White,
-                                uncheckedBorderColor = Color.Transparent,
-                            ),
-                            thumbContent = {},
-                        )
+                        IosSwitch(s.weekStartsMonday) { on -> vm.updateSettings { it.copy(weekStartsMonday = on) } }
                     },
                 )
             }
+        }
+        if (ledger.accounts.any { it.type == AccountType.CARD }) {
+            item { SectionHeader("Reminders") }
+            item {
+                GroupCard {
+                    ListRow(
+                        "Card bill reminders",
+                        icon = { SettingsIcon(Icons.Rounded.Notifications, Red) },
+                        trailing = {
+                            IosSwitch(s.billReminders) { on ->
+                                if (on && Build.VERSION.SDK_INT >= 33) notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                vm.setBillReminders(on)
+                            }
+                        },
+                    )
+                }
+            }
+            item { SectionFooter("A notification from three days before a card's due date, while there's still something to pay. Set each card's statement and due days in Accounts.") }
         }
         item { SectionHeader("Spreadsheet") }
         item {
@@ -375,13 +387,26 @@ private fun AccountDialog(
     var openingText by rememberSaveable {
         mutableStateOf(existing?.opening?.takeIf { it != 0L }?.let { Money.plain(kotlin.math.abs(it)) } ?: "")
     }
+    var limitText by rememberSaveable { mutableStateOf(existing?.limit?.takeIf { it > 0 }?.let { Money.plain(it) } ?: "") }
+    var statementText by rememberSaveable { mutableStateOf(existing?.statementDay?.toString() ?: "") }
+    var dueText by rememberSaveable { mutableStateOf(existing?.dueDay?.toString() ?: "") }
+    fun day(text: String) = text.toIntOrNull()?.takeIf { it in 1..31 }
+    // Both days or neither: a bill needs to know when it's made and when it's due.
+    val daysOk = (statementText.isEmpty() && dueText.isEmpty()) || (day(statementText) != null && day(dueText) != null)
     Alert(
         if (existing == null) "New account" else "Edit account", "Save",
-        confirmEnabled = name.isNotBlank() && currency.isNotBlank(),
+        confirmEnabled = name.isNotBlank() && currency.isNotBlank() && (type != AccountType.CARD || daysOk),
         onConfirm = {
             val v = Money.parse(openingText) ?: 0
-            val opening = if (type == AccountType.CARD) -v else v
-            onSave((existing ?: Account(newId(), "", type, currency)).copy(name = name.trim(), type = type, currency = currency, opening = opening))
+            val card = type == AccountType.CARD
+            onSave(
+                (existing ?: Account(newId(), "", type, currency)).copy(
+                    name = name.trim(), type = type, currency = currency, opening = if (card) -v else v,
+                    limit = if (card) Money.parse(limitText) ?: 0 else 0,
+                    statementDay = if (card) day(statementText) else null,
+                    dueDay = if (card) day(dueText) else null,
+                ),
+            )
         },
         onDismiss = onDismiss,
     ) {
@@ -397,6 +422,32 @@ private fun AccountDialog(
                 if (type == AccountType.CARD) "Amount owed now" else "Balance now",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
             )
+            if (type == AccountType.CARD) {
+                WellField(
+                    limitText, { v -> limitText = v.filter { it.isDigit() || it == '.' }.take(14) }, "Credit limit (optional)",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        WellField(
+                            statementText, { v -> statementText = v.filter { it.isDigit() }.take(2) }, "Statement day",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        )
+                    }
+                    Box(Modifier.weight(1f)) {
+                        WellField(
+                            dueText, { v -> dueText = v.filter { it.isDigit() }.take(2) }, "Due day",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        )
+                    }
+                }
+                Text(
+                    if (daysOk) "Days of the month, e.g. statement on the 15th, due on the 5th. They let Selavu show each bill and remind you."
+                    else "Enter both days, from 1 to 31.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (daysOk) palette.secondaryLabel else palette.red,
+                )
+            }
             if (canRemove) {
                 Text(
                     "Remove account", style = MaterialTheme.typography.bodyLarge, color = palette.red,
@@ -574,4 +625,22 @@ fun RepeatingScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
             dismissButton = { TextAction("Cancel") { stopping = null } },
         )
     }
+}
+
+/** A switch in iOS colours: green when on. */
+@Composable
+private fun IosSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onChange,
+        colors = SwitchDefaults.colors(
+            checkedTrackColor = palette.green,
+            checkedThumbColor = Color.White,
+            checkedBorderColor = Color.Transparent,
+            uncheckedTrackColor = palette.fill,
+            uncheckedThumbColor = Color.White,
+            uncheckedBorderColor = Color.Transparent,
+        ),
+        thumbContent = {},
+    )
 }

@@ -306,6 +306,71 @@ shot 11-rupees-after-transfer
 expect home 'text="+₹42,000"' "the transfer isn't shown arriving in the rupee group"
 echo "PASS: transfers between currencies"
 
+echo "--- A credit card and its bill"
+dump home
+tap home "Settings"
+sleep 2
+dump settings
+tap settings "Accounts"
+sleep 2
+dump accounts
+tap accounts "New account"
+sleep 2
+dump card
+tap card "Name"
+sleep 1
+adb shell input text Amex
+hide_keyboard
+dump card
+tap card "Credit card"
+sleep 1
+dump card
+fill() { # fill <dump name> <placeholder> <text>
+  scroll_to "$1" "$2"
+  tap "$1" "$2"
+  sleep 1
+  adb shell input text "$3"
+  hide_keyboard
+  dump "$1"
+}
+fill card "Amount owed now" 5000
+fill card "Credit limit" 50000
+fill card "Statement day" 1
+fill card "Due day" 28
+shot 12-new-card
+scroll_to card "Save"
+tap card "Save" last
+sleep 2
+dump accounts
+expect accounts 'text="Amex"' "the card isn't listed"
+expect accounts 'text="₹5,000 owed"' "the card doesn't show what's owed"
+echo "PASS: adds a credit card with what's owed"
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+dump settings
+expect settings 'text="Card bill reminders"' "Settings has no card bill reminders once there's a card"
+tap settings "Home"
+sleep 2
+dump home
+scroll_to home "Amex"
+expect home 'due' "the card on Home doesn't say when its bill is due"
+tap home "Amex"
+sleep 2
+dump carddetail
+shot 13-card
+expect carddetail 'text="Credit limit"' "the card's page doesn't show its limit"
+expect carddetail 'text="₹45,000"' "the card's page doesn't show the credit available"
+scroll_to carddetail "Pay bill"
+tap carddetail "Pay bill"
+sleep 2
+dump pay
+shot 14-pay-bill
+expect pay 'text="New transfer"' "Pay bill doesn't open a transfer"
+expect pay 'text="5000"' "Pay bill doesn't fill in the amount due"
+tap pay "Cancel"
+sleep 2
+echo "PASS: shows the card's bill and pays it"
+
 echo "--- Launcher shortcut"
 adb shell am start -W -a io.github.akrishna87.selavu.ADD_EXPENSE -n "$PKG/.MainActivity"
 sleep 3

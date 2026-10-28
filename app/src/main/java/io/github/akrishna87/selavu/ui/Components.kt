@@ -51,7 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.akrishna87.selavu.core.Account
 import io.github.akrishna87.selavu.core.AccountType
+import io.github.akrishna87.selavu.core.CardBill
 import io.github.akrishna87.selavu.core.Category
+import io.github.akrishna87.selavu.core.shortDate
 import io.github.akrishna87.selavu.core.Ledger
 import io.github.akrishna87.selavu.core.flow
 import io.github.akrishna87.selavu.core.Money
@@ -337,6 +339,28 @@ fun balanceText(account: Account, balance: Long): String = when {
     else -> Money.format(balance, account.currency)
 }
 
+/** A card bill in a few words: "₹3,000 due 5 Nov", "Overdue: ₹3,000", "Paid". */
+fun billLine(bill: CardBill, currency: String, today: LocalDate): String {
+    val amount = Money.format(bill.remaining, currency)
+    val days = bill.daysLeft(today)
+    return when {
+        bill.remaining == 0L -> if (bill.statementOwed == 0L) "Nothing due" else "Bill paid"
+        days < 0 -> "Overdue: $amount was due ${shortDate(bill.dueDate, today)}"
+        days == 0L -> "$amount due today"
+        days == 1L -> "$amount due tomorrow"
+        else -> "$amount due ${shortDate(bill.dueDate, today)}"
+    }
+}
+
+/** The colour for a bill line: red when overdue, orange when due within a few days. */
+@Composable
+fun billColor(bill: CardBill, today: LocalDate): Color = when {
+    bill.remaining == 0L -> palette.secondaryLabel
+    bill.overdue(today) -> palette.red
+    bill.daysLeft(today) <= 3 -> palette.orange
+    else -> palette.secondaryLabel
+}
+
 /** Switches between currency groups; shown only when there's more than one. */
 @Composable
 fun CurrencySwitcher(currencies: List<String>, current: String, onChoose: (String) -> Unit) {
@@ -356,6 +380,8 @@ fun ListRow(
     chevron: Boolean = true,
     titleColor: Color = palette.label,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    subtitle: String? = null,
+    subtitleColor: Color = palette.secondaryLabel,
     onClick: (() -> Unit)? = null,
 ) {
     Row(
@@ -368,7 +394,10 @@ fun ListRow(
             icon()
             Spacer(Modifier.width(14.dp))
         }
-        Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = subtitleColor) }
+        }
         value?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, color = palette.secondaryLabel, maxLines = 1, textAlign = TextAlign.End)
         }

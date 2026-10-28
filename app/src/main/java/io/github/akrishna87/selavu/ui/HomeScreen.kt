@@ -41,6 +41,7 @@ import io.github.akrishna87.selavu.core.Totals
 import io.github.akrishna87.selavu.core.TxType
 import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.budgetFor
+import io.github.akrishna87.selavu.core.cardBill
 import io.github.akrishna87.selavu.core.inCurrency
 import io.github.akrishna87.selavu.core.byDay
 import io.github.akrishna87.selavu.core.dayHeading
@@ -85,10 +86,13 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                     GroupCard {
                         accounts.forEachIndexed { i, a ->
                             if (i > 0) RowDivider(inset = 62.dp)
+                            val bill = ledger.cardBill(a.id, today)
                             ListRow(
                                 a.name,
                                 value = balanceText(a, ledger.balance(a.id)),
                                 icon = { AccountIcon(a) },
+                                subtitle = bill?.let { billLine(it, a.currency, today) },
+                                subtitleColor = bill?.let { billColor(it, today) } ?: palette.secondaryLabel,
                             ) { vm.open(Screen.AccountDetail(a.id)) }
                         }
                     }
