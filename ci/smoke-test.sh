@@ -228,7 +228,7 @@ expect accounts 'text="Cash"' "the Accounts screen doesn't list the Cash account
 tap accounts "New account"
 sleep 2
 dump newacc
-tap newacc "Name"
+tap newacc "Name" last
 sleep 1
 adb shell input text Chase
 hide_keyboard
@@ -317,7 +317,7 @@ dump accounts
 tap accounts "New account"
 sleep 2
 dump card
-tap card "Name"
+tap card "Name" last
 sleep 1
 adb shell input text Amex
 hide_keyboard
@@ -327,14 +327,14 @@ sleep 1
 dump card
 fill() { # fill <dump name> <placeholder> <text>
   scroll_to "$1" "$2"
-  tap "$1" "$2"
+  tap "$1" "$2" last # the field, not its label above it
   sleep 1
   adb shell input text "$3"
   hide_keyboard
   dump "$1"
 }
 fill card "Amount owed now" 5000
-fill card "Credit limit" 50000
+fill card "Credit limit (optional)" 50000
 fill card "Statement day" 1
 fill card "Due day" 28
 shot 12-new-card

@@ -442,7 +442,7 @@ fun PlainField(
     )
 }
 
-/** A text field in a grey rounded well, for dialogs. */
+/** A text field in a grey rounded well, for dialogs, with an optional small [label] above it. */
 @Composable
 fun WellField(
     value: String,
@@ -450,12 +450,18 @@ fun WellField(
     placeholder: String,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     prefix: String? = null,
+    label: String? = null,
 ) {
-    PlainField(
-        value, onValueChange, placeholder,
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(palette.fill).padding(horizontal = 12.dp, vertical = 11.dp),
-        keyboardOptions = keyboardOptions, prefix = prefix,
-    )
+    Column {
+        if (label != null) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        }
+        PlainField(
+            value, onValueChange, placeholder,
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(palette.fill).padding(horizontal = 12.dp, vertical = 11.dp),
+            keyboardOptions = keyboardOptions, prefix = prefix,
+        )
+    }
 }
 
 @Composable

@@ -281,7 +281,8 @@ private fun CurrencyPicker(value: String, onChange: (String) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Currencies.common.forEach { c -> Pill(c.trim(), value == c) { onChange(c) } }
     }
-    WellField(value, { onChange(it.take(5)) }, "Other symbol")
+    // Empty while one of the pills is chosen; typing here picks any other symbol.
+    WellField(value.takeIf { it !in Currencies.common }.orEmpty(), { onChange(it.take(5)) }, "Other symbol")
 }
 
 @Composable
@@ -411,7 +412,7 @@ private fun AccountDialog(
         onDismiss = onDismiss,
     ) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            WellField(name, { name = it.take(30) }, "Name")
+            WellField(name, { name = it.take(30) }, "Name", label = "Name")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 AccountType.entries.forEach { t -> Pill("${t.emoji} ${t.label}", type == t) { type = t } }
             }
@@ -421,23 +422,25 @@ private fun AccountDialog(
                 openingText, { v -> openingText = v.filter { it.isDigit() || it == '.' }.take(14) },
                 if (type == AccountType.CARD) "Amount owed now" else "Balance now",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
+                label = if (type == AccountType.CARD) "Amount owed now" else "Balance now",
             )
             if (type == AccountType.CARD) {
                 WellField(
                     limitText, { v -> limitText = v.filter { it.isDigit() || it == '.' }.take(14) }, "Credit limit (optional)",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), prefix = currency,
+                    label = "Credit limit",
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) {
                         WellField(
                             statementText, { v -> statementText = v.filter { it.isDigit() }.take(2) }, "Statement day",
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = "Statement day",
                         )
                     }
                     Box(Modifier.weight(1f)) {
                         WellField(
                             dueText, { v -> dueText = v.filter { it.isDigit() }.take(2) }, "Due day",
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = "Due day",
                         )
                     }
                 }
