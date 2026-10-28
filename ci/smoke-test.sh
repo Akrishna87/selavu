@@ -306,15 +306,10 @@ shot 11-rupees-after-transfer
 expect home 'text="+₹42,000"' "the transfer isn't shown arriving in the rupee group"
 echo "PASS: transfers between currencies"
 
-echo "--- A credit card and its bill"
+echo "--- A credit card and its bill (added from Home)"
 dump home
-tap home "Settings"
-sleep 2
-dump settings
-tap settings "Accounts"
-sleep 2
-dump accounts
-tap accounts "New account"
+scroll_to home "Add account"
+tap home "Add account"
 sleep 2
 dump card
 tap card "Name" last
@@ -341,14 +336,20 @@ shot 12-new-card
 scroll_to card "Save"
 tap card "Save" last
 sleep 2
-dump accounts
-expect accounts 'text="Amex"' "the card isn't listed"
-expect accounts 'text="₹5,000 owed"' "the card doesn't show what's owed"
-echo "PASS: adds a credit card with what's owed"
-adb shell input keyevent KEYCODE_BACK
+dump home
+echo "PASS: adds a credit card from Home"
+tap home "Settings"
 sleep 2
 dump settings
 expect settings 'text="Card bill reminders"' "Settings has no card bill reminders once there's a card"
+tap settings "Accounts"
+sleep 2
+dump accounts
+expect accounts 'text="Amex"' "the card isn't listed in Accounts"
+expect accounts 'text="₹5,000 owed"' "the card doesn't show what's owed"
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+dump settings
 tap settings "Home"
 sleep 2
 dump home

@@ -373,11 +373,11 @@ fun AccountsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
 
 /** Adding ([existing] null) or changing an account: name, kind, currency and opening balance. */
 @Composable
-private fun AccountDialog(
+fun AccountDialog(
     existing: Account?,
     defaultCurrency: String,
-    canRemove: Boolean,
-    onRemove: () -> Unit,
+    canRemove: Boolean = false,
+    onRemove: () -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (Account) -> Unit,
 ) {

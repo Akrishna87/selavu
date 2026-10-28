@@ -144,6 +144,8 @@ fun EditScreen(
     var showDate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var newCategory by remember { mutableStateOf(false) }
+    // Adding an account from here: "from" (or the only account) or "to" (a transfer's destination).
+    var newAccountFor by remember { mutableStateOf<String?>(null) }
     var triedSave by remember { mutableStateOf(false) }
     val date = LocalDate.ofEpochDay(dateEpoch)
     val amount = Money.parse(amountText)
@@ -219,16 +221,10 @@ fun EditScreen(
 
             if (type == TxType.TRANSFER) {
                 SectionHeader("From")
-                AccountPills(ledger, accountId) { accountId = it }
+                AccountPills(ledger, accountId, onNew = { newAccountFor = "from" }) { accountId = it }
                 SectionHeader("To")
-                if (ledger.accounts.size < 2) {
-                    GroupCard {
-                        ListRow("Add another account in Settings → Accounts to move money between them.", titleColor = palette.secondaryLabel)
-                    }
-                } else {
-                    AccountPills(ledger, toAccount?.id, exclude = accountId) { toAccountId = it }
-                    if (triedSave && toAccount == null) SectionFooter("Choose where the money went.")
-                }
+                AccountPills(ledger, toAccount?.id, exclude = accountId, onNew = { newAccountFor = "to" }) { toAccountId = it }
+                if (triedSave && toAccount == null) SectionFooter("Choose where the money went, or add the account with ＋ New.")
                 if (crossCurrency) {
                     Spacer(Modifier.height(12.dp))
                     GroupCard {
@@ -250,7 +246,7 @@ fun EditScreen(
                 }
             } else {
                 SectionHeader("Account")
-                AccountPills(ledger, accountId) { accountId = it }
+                AccountPills(ledger, accountId, onNew = { newAccountFor = "from" }) { accountId = it }
             }
 
             if (type != TxType.TRANSFER) SectionHeader("Category")
@@ -395,6 +391,14 @@ fun EditScreen(
         )
     }
 
+    newAccountFor?.let { which ->
+        AccountDialog(null, account.currency, onDismiss = { newAccountFor = null }) { a ->
+            vm.saveAccount(a)
+            if (which == "to") toAccountId = a.id else accountId = a.id
+            newAccountFor = null
+        }
+    }
+
     if (newCategory) {
         CategoryDialog(null, type, onDismiss = { newCategory = false }) { c ->
             vm.saveCategory(c)
@@ -406,7 +410,7 @@ fun EditScreen(
 
 /** The accounts to pick from as pills; with more than one currency, each shows its currency. */
 @Composable
-private fun AccountPills(ledger: Ledger, selected: String?, exclude: String? = null, onPick: (String) -> Unit) {
+private fun AccountPills(ledger: Ledger, selected: String?, exclude: String? = null, onNew: () -> Unit, onPick: (String) -> Unit) {
     val showCurrency = ledger.currencies().size > 1
     GroupCard {
         FlowRow(
@@ -420,6 +424,7 @@ private fun AccountPills(ledger: Ledger, selected: String?, exclude: String? = n
                     a.id == selected,
                 ) { onPick(a.id) }
             }
+            Pill("＋ New", false, onClick = onNew)
         }
     }
 }

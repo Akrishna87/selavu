@@ -23,6 +23,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +69,7 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         else -> null
     }
     val accounts = ledger.accounts(currency)
+    var addingAccount by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(padding)) {
         CurrencySwitcher(ledger.currencies(), currency, vm::chooseCurrency)
@@ -95,6 +100,17 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
                                 subtitleColor = bill?.let { billColor(it, today) } ?: palette.secondaryLabel,
                             ) { vm.open(Screen.AccountDetail(a.id)) }
                         }
+                        RowDivider(inset = 62.dp)
+                        ListRow(
+                            "Add account",
+                            titleColor = palette.tint,
+                            chevron = false,
+                            icon = {
+                                Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, tint = palette.tint, modifier = Modifier.size(26.dp))
+                                }
+                            },
+                        ) { addingAccount = true }
                     }
                 }
             }
@@ -128,6 +144,13 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         ) {
             TintedButton("Expense", Icons.Rounded.Remove, palette.red, Modifier.weight(1f)) { vm.open(Screen.Edit(TxType.EXPENSE)) }
             TintedButton("Income", Icons.Rounded.Add, palette.green, Modifier.weight(1f)) { vm.open(Screen.Edit(TxType.INCOME)) }
+        }
+    }
+
+    if (addingAccount) {
+        AccountDialog(null, currency, onDismiss = { addingAccount = false }) { a ->
+            vm.saveAccount(a)
+            addingAccount = false
         }
     }
 }
