@@ -374,6 +374,8 @@ sleep 2
 echo "PASS: shows the card's bill and pays it"
 
 echo "--- Export choices"
+adb shell input keyevent KEYCODE_BACK # from the card's page back to Home
+sleep 2
 dump home
 tap home "Settings"
 sleep 2
