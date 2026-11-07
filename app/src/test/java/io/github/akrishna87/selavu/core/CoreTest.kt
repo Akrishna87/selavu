@@ -390,3 +390,89 @@ class CardBillTest {
         assertNull(base.copy(accounts = listOf(card.copy(dueDay = null))).cardBill("amex", LocalDate.of(2026, 10, 28)))
     }
 }
+
+class BackupTest {
+    private val today = LocalDate.of(2026, 11, 7)
+    private val ledger = Ledger(
+        accounts = listOf(
+            Account(DEFAULT_ACCOUNT, "Cash", AccountType.CASH, "₹"),
+            Account("amex", "Amex", AccountType.CARD, "₹", opening = -5_000_50, limit = 50_000_00, statementDay = 15, dueDay = 5),
+            Account("chase", "Chase", AccountType.BANK, "$", opening = 100_00),
+            Account("enbd", "Emirates NBD", AccountType.BANK, "AED "),
+        ),
+        transactions = listOf(
+            Transaction("a", TxType.EXPENSE, 250_50, "food", today, "Lunch, with \"team\"", accountId = "amex"),
+            Transaction("b", TxType.INCOME, 2_000_00, "salary", today, accountId = "chase"),
+            Transaction("c", TxType.TRANSFER, 500_00, "", today, accountId = "chase", toAccountId = DEFAULT_ACCOUNT, toAmount = 42_000_00),
+            Transaction("d", TxType.EXPENSE, 10_00, "food", today, accountId = "enbd"),
+        ),
+        settings = Settings(budgets = mapOf("₹" to Budget(20_000_00), "$" to Budget(500_00, BudgetPeriod.WEEKLY))),
+    )
+
+    private fun same(a: Ledger, b: Ledger) {
+        assertEquals(
+            a.accounts.map { listOf(it.name, it.type, it.currency, it.opening, it.limit, it.statementDay, it.dueDay) }.toSet(),
+            b.accounts.map { listOf(it.name, it.type, it.currency, it.opening, it.limit, it.statementDay, it.dueDay) }.toSet(),
+        )
+        assertEquals(a.settings.budgets, b.settings.budgets)
+        fun entries(l: Ledger) = l.transactions.map {
+            listOf(it.date, it.type, it.amount, l.category(it.categoryId)?.name, l.account(it.accountId)?.name, l.account(it.toAccountId)?.name, it.toAmount, it.note)
+        }.toSet()
+        assertEquals(entries(a), entries(b))
+        a.accounts.forEach { acc -> assertEquals(a.balance(acc.id), b.balance(b.accounts.first { it.name == acc.name }.id)) }
+    }
+
+    @Test fun workbookRoundTrip() {
+        val sheets = Xlsx.read(Backup.workbook(ledger))
+        assertEquals(listOf("Entries", "Accounts", "Budgets"), sheets.map { it.first })
+        assertEquals(Csv.HEADER.split(","), sheets[0].second[0])
+        val r = Backup.import(Ledger(), sheets.map { it.second })
+        same(ledger, r.ledger)
+        assertEquals(3, r.accountsAdded) // Cash was already there
+        assertEquals(2, r.budgetsSet)
+        assertEquals("Added 4 entries, 3 accounts and 2 budgets", r.summary())
+        // Again: nothing new.
+        val again = Backup.import(r.ledger, sheets.map { it.second })
+        assertEquals(0, again.entries!!.added)
+        assertEquals(0, again.accountsAdded)
+    }
+
+    @Test fun csvFilesRoundTripInAnyOrder() {
+        val files = Backup.csvFiles(ledger)
+        assertEquals(listOf(Backup.Kind.ENTRIES, Backup.Kind.ACCOUNTS, Backup.Kind.BUDGETS), files.map { it.first })
+        val tables = files.reversed().map { Csv.parse(it.second) }
+        assertEquals(listOf(Backup.Kind.BUDGETS, Backup.Kind.ACCOUNTS, Backup.Kind.ENTRIES), tables.map { Backup.kind(it) })
+        same(ledger, Backup.import(Ledger(), tables).ledger)
+        assertTrue(files[1].second.contains("Amex,Credit card,₹,-5000.5,50000,15,5"))
+    }
+
+    @Test fun readsWorkbooksSavedByExcel() {
+        // Excel keeps text in a shared table and dates as day numbers; cells can be skipped.
+        val files = mapOf(
+            "xl/workbook.xml" to """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>""",
+            "xl/_rels/workbook.xml.rels" to """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t" Target="worksheets/sheet1.xml"/></Relationships>""",
+            "xl/sharedStrings.xml" to """<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Date</t></si><si><t>Type</t></si><si><t>Amount</t></si><si><r><t>Exp</t></r><r><t>ense</t></r></si></sst>""",
+            "xl/worksheets/sheet1.xml" to """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="D1" t="s"><v>2</v></c></row>
+                <row r="3"><c r="A3"><v>46333</v></c><c r="B3" t="s"><v>3</v></c><c r="D3"><v>99.989999999999995</v></c></row>
+                </sheetData></worksheet>""",
+        )
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            files.forEach { (n, t) -> z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(t.toByteArray()); z.closeEntry() }
+        }
+        val rows = Xlsx.read(out.toByteArray()).single().second
+        assertEquals(listOf("Date", "Type", "", "Amount"), rows[0])
+        assertEquals(listOf("46333", "Expense", "", "99.99"), rows[1])
+        val r = Backup.import(Ledger(), listOf(rows))
+        val t = r.ledger.transactions.single()
+        assertEquals(LocalDate.of(2026, 11, 7), t.date)
+        assertEquals(99_99L, t.amount)
+    }
+
+    @Test fun columns() {
+        assertEquals("A", Xlsx.column(0))
+        assertEquals("Z", Xlsx.column(25))
+        assertEquals("AA", Xlsx.column(26))
+    }
+}

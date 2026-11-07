@@ -75,7 +75,15 @@ fun HomeScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         CurrencySwitcher(ledger.currencies(), currency, vm::chooseCurrency)
         PeriodHeader(vm.periodType, period, vm::choosePeriodType, vm::shiftPeriod, vm::backToToday)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)) {
-            item { SummaryCard(totals, currency) }
+            item {
+                SummaryCard(
+                    held = accounts.sumOf { ledger.balance(it.id) },
+                    accountCount = accounts.size,
+                    totals = totals,
+                    currency = currency,
+                    periodLabel = period.label(today),
+                )
+            }
             if (budget != null) {
                 item { Spacer(Modifier.height(12.dp)) }
                 item { BudgetCard(budget, currency, perDayOnly = vm.periodType == PeriodType.DAY) }
@@ -171,19 +179,25 @@ private fun TintedButton(label: String, icon: ImageVector, color: Color, modifie
 }
 
 @Composable
-private fun SummaryCard(totals: Totals, currency: String) {
+private fun SummaryCard(held: Long, accountCount: Int, totals: Totals, currency: String, periodLabel: String) {
     GroupCard {
         Column(Modifier.padding(16.dp)) {
-            Text("Balance", style = MaterialTheme.typography.bodyMedium, color = palette.secondaryLabel)
+            // The money there is now, across this currency's accounts (cards' dues taken off).
             Text(
-                Money.format(totals.balance, currency),
-                style = MaterialTheme.typography.displaySmall, color = palette.label,
+                if (accountCount > 1) "Balance · $accountCount accounts" else "Balance",
+                style = MaterialTheme.typography.bodyMedium, color = palette.secondaryLabel,
             )
+            Text(Money.format(held, currency), style = MaterialTheme.typography.displaySmall, color = palette.label)
         }
         RowDivider()
-        Row(Modifier.fillMaxWidth().padding(16.dp)) {
-            Figure("Income", Money.format(totals.income, currency), palette.green, Modifier.weight(1f))
-            Figure("Expenses", Money.format(totals.expense, currency), palette.red, Modifier.weight(1f))
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(periodLabel, style = MaterialTheme.typography.bodySmall, color = palette.secondaryLabel)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Figure("Income", Money.format(totals.income, currency), palette.green, Modifier.weight(1f))
+                Figure("Expenses", Money.format(totals.expense, currency), palette.red, Modifier.weight(1f))
+                Figure("Net", Money.format(totals.balance, currency, sign = true), palette.gray, Modifier.weight(1f))
+            }
         }
     }
 }

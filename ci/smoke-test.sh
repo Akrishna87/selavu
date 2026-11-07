@@ -112,7 +112,7 @@ tap add2 "Save"
 sleep 2
 dump home
 expect home 'text="+₹50,000"' "the income isn't in the list"
-expect home 'text="₹49,750"' "the balance isn't income minus spending"
+expect home 'text="₹49,750"' "the balance isn't what the account holds"
 echo "PASS: logs an income and the balance adds up"
 
 echo "--- A repeating expense"
@@ -371,6 +371,29 @@ expect pay 'text="5000"' "Pay bill doesn't fill in the amount due"
 tap pay "Cancel"
 sleep 2
 echo "PASS: shows the card's bill and pays it"
+
+echo "--- Export choices"
+dump home
+tap home "Settings"
+sleep 2
+dump settings
+scroll_to settings "Export"
+tap settings "Export"
+sleep 2
+dump export
+expect export 'text="Excel"' "the Export dialog has no Excel choice"
+expect export 'text="CSV"' "the Export dialog has no CSV choice"
+tap export "Both"
+sleep 1
+dump export
+shot 15-export
+expect export "The Excel workbook and the three CSV files" "choosing Both doesn't say what it saves"
+tap export "Cancel"
+sleep 1
+dump settings
+tap settings "Home"
+sleep 2
+echo "PASS: offers Excel, CSV or both"
 
 echo "--- Launcher shortcut"
 adb shell am start -W -a io.github.akrishna87.selavu.ADD_EXPENSE -n "$PKG/.MainActivity"

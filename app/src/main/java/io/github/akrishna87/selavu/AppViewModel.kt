@@ -2,6 +2,7 @@ package io.github.akrishna87.selavu
 
 import android.app.Application
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,7 +11,9 @@ import androidx.lifecycle.viewModelScope
 import io.github.akrishna87.selavu.core.Account
 import io.github.akrishna87.selavu.core.Budget
 import io.github.akrishna87.selavu.core.Category
+import io.github.akrishna87.selavu.core.Backup
 import io.github.akrishna87.selavu.core.Csv
+import io.github.akrishna87.selavu.core.Xlsx
 import io.github.akrishna87.selavu.core.Ledger
 import io.github.akrishna87.selavu.core.Period
 import io.github.akrishna87.selavu.core.PeriodType
@@ -148,40 +151,85 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         s.copy(budgets = if (budget.amount > 0) s.budgets + (currency to budget) else s.budgets - currency)
     }
 
-    fun exportCsv(uri: Uri) {
+    /** Saves the Excel workbook (Entries, Accounts and Budgets sheets) to a file the person chose. */
+    fun exportWorkbook(uri: Uri) {
         val l = _ledger.value ?: return
         viewModelScope.launch {
             message = try {
                 withContext(Dispatchers.IO) {
-                    getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use {
-                        it.write(Csv.export(l).toByteArray())
-                    }
+                    resolver.openOutputStream(uri, "wt")!!.use { it.write(Backup.workbook(l)) }
                 }
-                "Saved ${l.transactions.size} entries"
+                "Saved ${count(l.transactions.size, "entry", "entries")}, ${count(l.accounts.size, "account", "accounts")} and budgets to Excel"
             } catch (e: Exception) {
                 "Couldn't save the file"
             }
         }
     }
 
-    fun importCsv(uri: Uri) {
+    /**
+     * Saves into a folder the person chose: the three CSV files (entries, accounts, budgets)
+     * and/or the Excel workbook, each named with today's date.
+     */
+    fun exportToFolder(tree: Uri, csv: Boolean, excel: Boolean) {
+        val l = _ledger.value ?: return
         viewModelScope.launch {
-            val text = try {
-                withContext(Dispatchers.IO) {
-                    getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() }
+            message = try {
+                val saved = withContext(Dispatchers.IO) {
+                    val folder = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                    val day = LocalDate.now()
+                    fun save(mime: String, name: String, bytes: ByteArray) {
+                        val doc = DocumentsContract.createDocument(resolver, folder, mime, name) ?: error("Couldn't create $name")
+                        resolver.openOutputStream(doc, "wt")!!.use { it.write(bytes) }
+                    }
+                    var files = 0
+                    if (csv) Backup.csvFiles(l).forEach { (kind, text) ->
+                        save("text/csv", "Selavu ${kind.title.lowercase()} $day.csv", text.toByteArray())
+                        files++
+                    }
+                    if (excel) {
+                        save(Xlsx.MIME, "Selavu $day.xlsx", Backup.workbook(l))
+                        files++
+                    }
+                    files
                 }
+                "Saved $saved files: ${count(l.transactions.size, "entry", "entries")}, accounts and budgets"
             } catch (e: Exception) {
-                message = "Couldn't open the file"
-                return@launch
-            }
-            val current = _ledger.value ?: return@launch
-            val result = Csv.import(current, text)
-            update { result.ledger }
-            message = buildString {
-                append("Added ${result.added} ${if (result.added == 1) "entry" else "entries"}")
-                if (result.skipped > 0) append(", ${result.skipped} already here")
-                if (result.failed > 0) append(", ${result.failed} rows not understood")
+                "Couldn't save to that folder"
             }
         }
     }
+
+    /**
+     * Imports CSV files and Excel workbooks (any mix, any order): every sheet and file is
+     * recognised by its header, accounts and budgets go in first, and entries already here are skipped.
+     */
+    fun importFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val tables = try {
+                withContext(Dispatchers.IO) {
+                    uris.flatMap { uri ->
+                        val bytes = resolver.openInputStream(uri)!!.use { it.readBytes() }
+                        // A workbook is a zip file: it starts with "PK".
+                        if (bytes.size > 2 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) {
+                            Xlsx.read(bytes).map { it.second }
+                        } else {
+                            listOf(Csv.parse(bytes.decodeToString().removePrefix("\uFEFF")))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                message = "Couldn't read that file. Choose a CSV or Excel (.xlsx) file."
+                return@launch
+            }
+            val current = _ledger.value ?: return@launch
+            val result = Backup.import(current, tables)
+            update { result.ledger }
+            message = result.summary()
+        }
+    }
+
+    private val resolver get() = getApplication<Application>().contentResolver
+
+    private fun count(n: Int, one: String, many: String) = "$n ${if (n == 1) one else many}"
 }

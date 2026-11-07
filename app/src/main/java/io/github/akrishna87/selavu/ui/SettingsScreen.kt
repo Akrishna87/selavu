@@ -64,6 +64,7 @@ import io.github.akrishna87.selavu.core.AccountType
 import io.github.akrishna87.selavu.core.Budget
 import io.github.akrishna87.selavu.core.BudgetPeriod
 import io.github.akrishna87.selavu.core.Currencies
+import io.github.akrishna87.selavu.core.Xlsx
 import io.github.akrishna87.selavu.core.accountUsage
 import io.github.akrishna87.selavu.core.balance
 import io.github.akrishna87.selavu.core.Category
@@ -91,11 +92,17 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
     var editBudget by remember { mutableStateOf<String?>(null) }
     var editCurrency by remember { mutableStateOf(false) }
     val currencies = ledger.currencies()
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        uri?.let(vm::exportCsv)
+    // Excel alone is one file; CSV (three files) or both go into a folder.
+    var exporting by remember { mutableStateOf(false) }
+    var folderFormat by remember { mutableStateOf(ExportFormat.CSV) }
+    val saveWorkbook = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(Xlsx.MIME)) { uri ->
+        uri?.let(vm::exportWorkbook)
     }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(vm::importCsv)
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        tree?.let { vm.exportToFolder(it, csv = true, excel = folderFormat == ExportFormat.BOTH) }
+    }
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        vm.importFiles(uris)
     }
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) vm.message = "Notifications are off for Selavu, so reminders can't be shown. You can allow them in the phone's settings."
@@ -170,22 +177,22 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
             }
             item { SectionFooter("A notification from three days before a card's due date, while there's still something to pay. Set each card's statement and due days in Accounts.") }
         }
-        item { SectionHeader("Spreadsheet") }
+        item { SectionHeader("Excel and CSV") }
         item {
             GroupCard {
-                ListRow("Export to CSV", icon = { SettingsIcon(Icons.Rounded.FileUpload, Teal) }) {
-                    export.launch("Selavu ${LocalDate.now()}.csv")
+                ListRow("Export", value = "Excel or CSV", icon = { SettingsIcon(Icons.Rounded.FileUpload, Teal) }) {
+                    exporting = true
                 }
                 RowDivider(inset = 59.dp)
-                ListRow("Import from CSV", icon = { SettingsIcon(Icons.Rounded.FileDownload, Indigo) }) {
-                    importer.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "application/octet-stream"))
+                ListRow("Import", value = "Excel or CSV", icon = { SettingsIcon(Icons.Rounded.FileDownload, Indigo) }) {
+                    importer.launch(arrayOf(Xlsx.MIME, "text/*", "application/csv", "application/vnd.ms-excel", "application/octet-stream"))
                 }
             }
         }
         item {
             SectionFooter(
-                "Export saves all ${ledger.transactions.size} entries for Excel, Google Sheets or a backup. " +
-                    "Import reads columns Date, Type, Category, Amount, Note and skips entries already here.",
+                "Export saves your ${ledger.transactions.size} entries, your accounts and your budgets, for Excel, Google Sheets " +
+                    "or a backup. Import reads those files back (several at once is fine) and skips entries already here.",
             )
         }
         item {
@@ -199,6 +206,18 @@ fun SettingsScreen(vm: AppViewModel, ledger: Ledger, padding: PaddingValues) {
         }
     }
 
+    if (exporting) {
+        ExportDialog(onDismiss = { exporting = false }) { format ->
+            exporting = false
+            when (format) {
+                ExportFormat.EXCEL -> saveWorkbook.launch("Selavu ${LocalDate.now()}.xlsx")
+                else -> {
+                    folderFormat = format
+                    pickFolder.launch(null)
+                }
+            }
+        }
+    }
     editBudget?.let { c ->
         BudgetDialog(ledger, c, onDismiss = { editBudget = null }) { amount, period ->
             vm.setBudget(c, Budget(amount, period))
@@ -646,4 +665,21 @@ private fun IosSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
         ),
         thumbContent = {},
     )
+}
+
+enum class ExportFormat(val label: String, val detail: String) {
+    EXCEL("Excel", "One workbook (.xlsx) with Entries, Accounts and Budgets sheets."),
+    CSV("CSV", "Three files (entries, accounts and budgets) in a folder you choose."),
+    BOTH("Both", "The Excel workbook and the three CSV files, in a folder you choose."),
+}
+
+@Composable
+private fun ExportDialog(onDismiss: () -> Unit, onExport: (ExportFormat) -> Unit) {
+    var format by rememberSaveable { mutableStateOf(ExportFormat.EXCEL) }
+    Alert("Export", "Export", onConfirm = { onExport(format) }, onDismiss = onDismiss) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Segmented(ExportFormat.entries.map { it.label }, ExportFormat.entries.indexOf(format)) { format = ExportFormat.entries[it] }
+            Text(format.detail, style = MaterialTheme.typography.bodyMedium, color = palette.secondaryLabel)
+        }
+    }
 }

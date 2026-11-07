@@ -12,7 +12,8 @@ permission.
 
 **Home**
 - Day, Week, Month or Year at the top; ‹ › step through them, and tapping the label goes back to today
-- Balance for the period, with income and spending under it
+- Balance: the money in that currency's accounts now (credit card dues taken off), with the
+  period's income, spending and net under it
 - Every entry, grouped by day with each day's total; tap one to change or delete it
 - Big **Expense** and **Income** buttons at the bottom
 
@@ -53,8 +54,10 @@ permission.
 - Categories: add, rename, change the emoji and colour, or remove one (its entries move to another)
 - Repeating entries: see what's coming next, and stop any of them
 - Main currency (₹ by default, with Indian digit grouping: ₹1,25,000), and whether weeks start on Monday or Sunday
-- **Export to CSV** (Date, Type, Category, Amount, Currency, Account, To account, To currency, To amount, Note) for Excel, Google Sheets or a backup, and
-  **Import from CSV**, which skips entries already there
+- **Export** to **Excel** (one .xlsx workbook with Entries, Accounts and Budgets sheets), **CSV** (three
+  files in a folder you choose) or **both**, for Excel, Google Sheets or a backup
+- **Import** any of those files, several at once: accounts and budgets are added, and entries already
+  there are skipped. Older CSV exports import too
 
 ## How it's built
 

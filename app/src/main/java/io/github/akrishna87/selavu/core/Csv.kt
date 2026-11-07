@@ -1,5 +1,6 @@
 package io.github.akrishna87.selavu.core
 
+import java.math.BigDecimal
 import java.time.LocalDate
 
 /**
@@ -10,27 +11,45 @@ import java.time.LocalDate
 object Csv {
     const val HEADER = "Date,Type,Category,Amount,Currency,Account,To account,To currency,To amount,Note"
 
-    fun export(ledger: Ledger): String = buildString {
-        append(HEADER).append("\r\n")
-        ledger.transactions.sortedBy { it.date }.forEach { t ->
-            val cat = ledger.category(t.categoryId)?.name ?: ""
+    fun export(ledger: Ledger): String = write(entryRows(ledger))
+
+    /** The entries as a table: the header, then one row per entry, oldest first. Amounts are numbers. */
+    fun entryRows(ledger: Ledger): List<List<Any?>> = listOf(HEADER.split(",")) +
+        ledger.transactions.sortedBy { it.date }.map { t ->
+            val transfer = t.type == TxType.TRANSFER
             val to = ledger.account(t.toAccountId)
-            append(t.date).append(',')
-            append(
+            listOf(
+                t.date.toString(),
                 when (t.type) {
                     TxType.INCOME -> "Income"
                     TxType.EXPENSE -> "Expense"
                     TxType.TRANSFER -> "Transfer"
                 },
-            ).append(',')
-            append(quote(if (t.type == TxType.TRANSFER) "" else cat)).append(',')
-            append(Money.plain(t.amount)).append(',')
-            append(quote(ledger.currencyOf(t).trim())).append(',')
-            append(quote(ledger.account(t.accountId)?.name ?: "")).append(',')
-            append(quote(to?.name ?: "")).append(',')
-            append(quote(to?.currency?.trim() ?: "")).append(',')
-            append(if (t.type == TxType.TRANSFER) Money.plain(t.toAmount) else "").append(',')
-            append(quote(t.note)).append("\r\n")
+                if (transfer) "" else ledger.category(t.categoryId)?.name ?: "",
+                amount(t.amount),
+                ledger.currencyOf(t).trim(),
+                ledger.account(t.accountId)?.name ?: "",
+                to?.name ?: "",
+                to?.currency?.trim() ?: "",
+                if (transfer) amount(t.toAmount) else null,
+                t.note,
+            )
+        }
+
+    /** An amount in paise/cents as a plain decimal number: 25050 → 250.5. */
+    fun amount(minor: Long): BigDecimal = BigDecimal(Money.plain(minor))
+
+    /** A table as CSV text, with Windows line endings so Excel opens it cleanly. */
+    fun write(rows: List<List<Any?>>): String = buildString {
+        rows.forEach { row ->
+            append(row.joinToString(",") { v ->
+                when (v) {
+                    null -> ""
+                    is BigDecimal -> v.toPlainString()
+                    else -> quote(v.toString())
+                }
+            })
+            append("\r\n")
         }
     }
 
@@ -42,8 +61,11 @@ object Csv {
      * ledger (same date, type, category, amount, account and note) are skipped, so importing the
      * same file twice adds nothing. Rows without an account go into the main currency's first one.
      */
-    fun import(ledger: Ledger, text: String, id: () -> String = ::newId): Imported {
-        val rows = parse(text.removePrefix("﻿"))
+    fun import(ledger: Ledger, text: String, id: () -> String = ::newId): Imported =
+        importRows(ledger, parse(text.removePrefix("\uFEFF")), id)
+
+    /** Adds the entries in [rows] (a table as [entryRows] makes, from a CSV or a spreadsheet). */
+    fun importRows(ledger: Ledger, rows: List<List<String>>, id: () -> String = ::newId): Imported {
         if (rows.isEmpty()) return Imported(ledger, 0, 0, 0)
         val header = rows.first().map { it.trim().lowercase() }
         val hasHeader = "date" in header
@@ -79,7 +101,7 @@ object Csv {
         var failed = 0
         for (row in if (hasHeader) rows.drop(1) else rows) {
             if (row.all { it.isBlank() }) continue
-            val date = runCatching { LocalDate.parse(row.at(iDate)) }.getOrNull()
+            val date = date(row.at(iDate))
             val rawAmount = row.at(iAmount)
             val amount = Money.parse(rawAmount)
             if (date == null || amount == null) { failed++; continue }
@@ -115,6 +137,13 @@ object Csv {
             added.size, skipped, failed,
         )
     }
+
+    /**
+     * A date as written here (2026-10-17), or as a spreadsheet may hold it once edited: a day
+     * number counted from 30 Dec 1899, as Excel and Google Sheets store dates.
+     */
+    fun date(text: String): LocalDate? = runCatching { LocalDate.parse(text) }.getOrNull()
+        ?: text.toDoubleOrNull()?.toLong()?.takeIf { it in 20_000..80_000 }?.let { LocalDate.of(1899, 12, 30).plusDays(it) }
 
     private fun key(t: Transaction, categoryName: String, accountName: String) =
         listOf(t.date.toString(), t.type.name, categoryName.lowercase(), t.amount.toString(), accountName.lowercase(), t.note.trim())
