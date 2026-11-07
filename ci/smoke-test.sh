@@ -193,6 +193,7 @@ dump reports
 tap reports "Home"
 sleep 2
 dump home
+scroll_to home "Groceries"
 tap home "Groceries"
 sleep 2
 dump edit
